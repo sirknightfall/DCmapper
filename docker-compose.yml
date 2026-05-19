@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    container_name: dcmapper-backend
+    volumes:
+      - ./backend:/app
+      - db_data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:///./data/dcmapper.db
+    cap_add:
+      - NET_RAW
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    container_name: dcmapper-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
