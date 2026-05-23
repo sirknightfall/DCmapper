@@ -2,12 +2,12 @@ from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import asyncio
-from sqlmodel import Session, select
+from sqlmodel import Session, select, text
 from app.database import create_db_and_tables, get_session, engine
 from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory
 from app.schemas import (
     DatacenterCreate, DatacenterRead, DatacenterWithRacks,
-    RackCreate, RackRead, RackWithDevices,
+    RackCreate, RackRead, RackWithDevices, RackUpdate,
     DeviceCreate, DeviceRead, DeviceUpdate,
     SystemConfigRead, SystemConfigUpdate,
     StatusHistoryRead
@@ -27,13 +27,27 @@ app.add_middleware(
 @app.on_event("startup")
 async def on_startup():
     create_db_and_tables()
-    # Ensure default config exists
+    
+    # Simple migration: add width/height to datacenter if missing
     with Session(engine) as session:
-        config = session.exec(select(SystemConfig)).first()
-        if not config:
-            config = SystemConfig(check_interval_seconds=60)
-            session.add(config)
+        try:
+            session.execute(text("ALTER TABLE datacenter ADD COLUMN width INTEGER DEFAULT 10"))
+            session.execute(text("ALTER TABLE datacenter ADD COLUMN height INTEGER DEFAULT 10"))
             session.commit()
+        except Exception:
+            # Columns likely already exist
+            session.rollback()
+
+    # Ensure default config exists
+    try:
+        with Session(engine) as session:
+            config = session.exec(select(SystemConfig)).first()
+            if not config:
+                config = SystemConfig(check_interval_seconds=60)
+                session.add(config)
+                session.commit()
+    except Exception as e:
+        print(f"Error initializing config: {e}")
             
     # Start the background ping task
     asyncio.create_task(status_monitor_task())
@@ -81,6 +95,39 @@ def read_rack(rack_id: int, session: Session = Depends(get_session)):
     if not rack:
         raise HTTPException(status_code=404, detail="Rack not found")
     return rack
+
+@app.patch("/racks/{rack_id}", response_model=RackRead)
+def update_rack(rack_id: int, rack_update: RackUpdate, session: Session = Depends(get_session)):
+    db_rack = session.get(Rack, rack_id)
+    if not db_rack:
+        raise HTTPException(status_code=404, detail="Rack not found")
+    
+    dc = session.get(Datacenter, db_rack.datacenter_id)
+    
+    # Validation if coordinates are changing
+    new_x = rack_update.x_coord if rack_update.x_coord is not None else db_rack.x_coord
+    new_y = rack_update.y_coord if rack_update.y_coord is not None else db_rack.y_coord
+    
+    if new_x != db_rack.x_coord or new_y != db_rack.y_coord:
+        # 1. Boundary check
+        if dc and (new_x < 0 or new_x >= dc.width or new_y < 0 or new_y >= dc.height):
+            raise HTTPException(status_code=400, detail=f"Coordinates out of datacenter bounds ({dc.width}x{dc.height})")
+        
+        # 2. Overlap check
+        statement = select(Rack).where(Rack.datacenter_id == db_rack.datacenter_id).where(Rack.id != rack_id)
+        statement = statement.where(Rack.x_coord == new_x).where(Rack.y_coord == new_y)
+        existing_rack = session.exec(statement).first()
+        if existing_rack:
+            raise HTTPException(status_code=400, detail=f"A rack named '{existing_rack.name}' already exists at {new_x},{new_y}")
+
+    rack_data = rack_update.dict(exclude_unset=True)
+    for key, value in rack_data.items():
+        setattr(db_rack, key, value)
+    
+    session.add(db_rack)
+    session.commit()
+    session.refresh(db_rack)
+    return db_rack
 
 # --- Device Routes ---
 

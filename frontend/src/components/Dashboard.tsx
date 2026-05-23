@@ -12,7 +12,13 @@ const Dashboard: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const [newDC, setNewDC] = useState({ name: '', address: '', description: '' });
+  const [newDC, setNewDC] = useState({ 
+    name: '', 
+    address: '', 
+    description: '', 
+    width: 10, 
+    height: 10 
+  });
 
   const fetchDatacenters = () => {
     setLoading(true);
@@ -37,7 +43,7 @@ const Dashboard: React.FC = () => {
     createDatacenter(newDC)
       .then(() => {
         setIsModalOpen(false);
-        setNewDC({ name: '', address: '', description: '' });
+        setNewDC({ name: '', address: '', description: '', width: 10, height: 10 });
         fetchDatacenters();
       })
       .catch(err => {
@@ -86,12 +92,17 @@ const Dashboard: React.FC = () => {
             <p className="text-slate-600 text-sm mb-4 line-clamp-2">
               {dc.address}
             </p>
-            {dc.description && (
-              <p className="text-slate-500 text-xs flex items-center gap-1">
-                <Info size={14} />
-                {dc.description}
-              </p>
-            )}
+            <div className="flex justify-between items-center">
+              {dc.description ? (
+                <p className="text-slate-500 text-xs flex items-center gap-1">
+                  <Info size={14} />
+                  {dc.description}
+                </p>
+              ) : <div />}
+              <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 font-mono">
+                {dc.width}x{dc.height} Grid
+              </span>
+            </div>
           </Link>
         ))}
         {datacenters.length === 0 && !loading && (
@@ -134,6 +145,36 @@ const Dashboard: React.FC = () => {
               onChange={e => setNewDC({...newDC, description: e.target.value})}
             />
           </div>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Grid Width</label>
+              <input 
+                type="number"
+                min="1"
+                max="50"
+                required
+                disabled={isSubmitting}
+                className="w-full border rounded px-3 py-2 disabled:bg-slate-50 font-mono"
+                value={newDC.width}
+                onChange={e => setNewDC({...newDC, width: parseInt(e.target.value)})}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Grid Height</label>
+              <input 
+                type="number"
+                min="1"
+                max="50"
+                required
+                disabled={isSubmitting}
+                className="w-full border rounded px-3 py-2 disabled:bg-slate-50 font-mono"
+                value={newDC.height}
+                onChange={e => setNewDC({...newDC, height: parseInt(e.target.value)})}
+              />
+            </div>
+          </div>
+
           <button 
             type="submit" 
             disabled={isSubmitting}

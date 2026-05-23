@@ -1,20 +1,25 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getDatacenter, createRack } from '../api';
-import type { DatacenterWithRacks } from '../types';
-import { ChevronLeft, Plus } from 'lucide-react';
+import { getDatacenter, createRack, updateRack } from '../api';
+import type { DatacenterWithRacks, Rack } from '../types';
+import { ChevronLeft, Plus, Move } from 'lucide-react';
 import Modal from './Modal';
 
 const GridView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [dc, setDc] = useState<DatacenterWithRacks | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   const [newRack, setNewRack] = useState({ name: '', x_coord: 0, y_coord: 0, height_u: 42 });
+  const [selectedRack, setSelectedRack] = useState<Rack | null>(null);
+  const [moveData, setMoveData] = useState({ x: 0, y: 0 });
 
   const fetchDC = () => {
     if (id) {
@@ -45,9 +50,33 @@ const GridView: React.FC = () => {
           fetchDC();
         })
         .catch(err => {
-          console.error("Failed to create rack:", err);
           const msg = err.response?.data?.detail || err.message || "Unknown error";
           setError(`Failed to place rack: ${msg}`);
+        })
+        .finally(() => setIsSubmitting(false));
+    }
+  };
+
+  const openMoveModal = (rack: Rack) => {
+    setSelectedRack(rack);
+    setMoveData({ x: rack.x_coord, y: rack.y_coord });
+    setError(null);
+    setIsMoveModalOpen(true);
+  };
+
+  const handleMove = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedRack) {
+      setIsSubmitting(true);
+      setError(null);
+      updateRack(selectedRack.id, { x_coord: moveData.x, y_coord: moveData.y })
+        .then(() => {
+          setIsMoveModalOpen(false);
+          fetchDC();
+        })
+        .catch(err => {
+          const msg = err.response?.data?.detail || err.message || "Unknown error";
+          setError(`Failed to move rack: ${msg}`);
         })
         .finally(() => setIsSubmitting(false));
     }
@@ -56,8 +85,8 @@ const GridView: React.FC = () => {
   if (loading && !dc) return <div className="text-center py-10">Loading floor plan...</div>;
   if (!dc) return <div className="text-center py-10">Datacenter not found.</div>;
 
-  const maxX = Math.max(10, ...dc.racks.map(r => r.x_coord + 1));
-  const maxY = Math.max(10, ...dc.racks.map(r => r.y_coord + 1));
+  const maxX = dc.width;
+  const maxY = dc.height;
 
   return (
     <div>
@@ -85,7 +114,7 @@ const GridView: React.FC = () => {
         </button>
       </div>
 
-      {error && (
+      {error && !isModalOpen && !isMoveModalOpen && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
           {error}
         </div>
@@ -105,16 +134,26 @@ const GridView: React.FC = () => {
               return (
                 <div 
                   key={`${x}-${y}`}
-                  className={`w-[60px] h-[60px] border rounded flex items-center justify-center relative ${rack ? 'bg-slate-800 text-white cursor-pointer hover:bg-slate-700' : 'bg-slate-50 border-slate-200'}`}
+                  className={`group w-[60px] h-[60px] border rounded flex items-center justify-center relative transition-colors ${rack ? 'bg-slate-800 text-white' : 'bg-slate-50 border-slate-200'}`}
                 >
                   {rack ? (
-                    <Link to={`/rack/${rack.id}`} className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">
-                      {rack.name}
-                    </Link>
+                    <>
+                      <Link to={`/rack/${rack.id}`} className="absolute inset-0 flex items-center justify-center text-[10px] font-bold z-0">
+                        {rack.name}
+                      </Link>
+                      <button 
+                        onClick={() => openMoveModal(rack)}
+                        className="absolute top-0 right-0 p-1 bg-blue-600 text-white rounded-bl opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                        title="Move Rack"
+                      >
+                        <Move size={10} />
+                      </button>
+                    </>
                   ) : (
                     <span 
-                      className="text-slate-200 text-[8px] cursor-pointer hover:text-blue-400"
+                      className="text-slate-200 text-[8px] cursor-pointer hover:text-blue-400 w-full h-full flex items-center justify-center"
                       onClick={() => {
+                        setError(null);
                         setNewRack({ ...newRack, x_coord: x, y_coord: y });
                         setIsModalOpen(true);
                       }}
@@ -131,6 +170,7 @@ const GridView: React.FC = () => {
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Place New Rack">
         <form onSubmit={handleCreate} className="space-y-4">
+          {error && <div className="bg-red-50 text-red-600 p-2 rounded text-xs border border-red-200">{error}</div>}
           <div>
             <label className="block text-sm font-medium mb-1">Rack Name</label>
             <input 
@@ -148,7 +188,7 @@ const GridView: React.FC = () => {
               <input 
                 type="number"
                 disabled={isSubmitting}
-                className="w-full border rounded px-3 py-2 disabled:bg-slate-50"
+                className="w-full border rounded px-3 py-2 disabled:bg-slate-50 font-mono"
                 value={newRack.x_coord}
                 onChange={e => setNewRack({...newRack, x_coord: parseInt(e.target.value)})}
               />
@@ -158,7 +198,7 @@ const GridView: React.FC = () => {
               <input 
                 type="number"
                 disabled={isSubmitting}
-                className="w-full border rounded px-3 py-2 disabled:bg-slate-50"
+                className="w-full border rounded px-3 py-2 disabled:bg-slate-50 font-mono"
                 value={newRack.y_coord}
                 onChange={e => setNewRack({...newRack, y_coord: parseInt(e.target.value)})}
               />
@@ -169,7 +209,7 @@ const GridView: React.FC = () => {
             <input 
               type="number"
               disabled={isSubmitting}
-              className="w-full border rounded px-3 py-2 disabled:bg-slate-50"
+              className="w-full border rounded px-3 py-2 disabled:bg-slate-50 font-mono"
               value={newRack.height_u}
               onChange={e => setNewRack({...newRack, height_u: parseInt(e.target.value)})}
             />
@@ -180,6 +220,47 @@ const GridView: React.FC = () => {
             className="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700 disabled:bg-blue-400"
           >
             {isSubmitting ? 'Placing...' : 'Place Rack'}
+          </button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={isMoveModalOpen} onClose={() => setIsMoveModalOpen(false)} title={`Move Rack: ${selectedRack?.name}`}>
+        <form onSubmit={handleMove} className="space-y-4">
+          {error && <div className="bg-red-50 text-red-600 p-2 rounded text-xs border border-red-200">{error}</div>}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">New X Coordinate</label>
+              <input 
+                type="number"
+                min="0"
+                max={maxX - 1}
+                required
+                disabled={isSubmitting}
+                className="w-full border rounded px-3 py-2 disabled:bg-slate-50 font-mono"
+                value={moveData.x}
+                onChange={e => setMoveData({...moveData, x: parseInt(e.target.value)})}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">New Y Coordinate</label>
+              <input 
+                type="number"
+                min="0"
+                max={maxY - 1}
+                required
+                disabled={isSubmitting}
+                className="w-full border rounded px-3 py-2 disabled:bg-slate-50 font-mono"
+                value={moveData.y}
+                onChange={e => setMoveData({...moveData, y: parseInt(e.target.value)})}
+              />
+            </div>
+          </div>
+          <button 
+            type="submit" 
+            disabled={isSubmitting}
+            className="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700 disabled:bg-blue-400"
+          >
+            {isSubmitting ? 'Moving...' : 'Confirm Move'}
           </button>
         </form>
       </Modal>

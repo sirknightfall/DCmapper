@@ -7,6 +7,8 @@ class Datacenter(SQLModel, table=True):
     name: str
     address: str
     description: Optional[str] = None
+    width: int = Field(default=10)
+    height: int = Field(default=10)
     
     racks: List["Rack"] = Relationship(back_populates="datacenter")
 

@@ -7,6 +7,8 @@ class DatacenterBase(BaseModel):
     name: str
     address: str
     description: Optional[str] = None
+    width: int = 10
+    height: int = 10
 
 class DatacenterCreate(DatacenterBase):
     pass
@@ -27,6 +29,12 @@ class RackCreate(RackBase):
 
 class RackRead(RackBase):
     id: int
+
+class RackUpdate(BaseModel):
+    name: Optional[str] = None
+    x_coord: Optional[int] = None
+    y_coord: Optional[int] = None
+    height_u: Optional[int] = None
 
 # Device Schemas
 class DeviceBase(BaseModel):

@@ -20,6 +20,7 @@ export const getRack = (id: number) => api.get<RackWithDevices>(`/racks/${id}`).
 export const getRacks = () => api.get<Rack[]>('/racks/').then((res: any) => res.data);
 export const createDatacenter = (dc: Omit<Datacenter, 'id'>) => api.post<Datacenter>('/datacenters/', dc).then((res: any) => res.data);
 export const createRack = (rack: Omit<Rack, 'id'>) => api.post<Rack>('/racks/', rack).then((res: any) => res.data);
+export const updateRack = (id: number, rack: Partial<Rack>) => api.patch<Rack>(`/racks/${id}`, rack).then((res: any) => res.data);
 export const createDevice = (device: any) => api.post<Device>('/devices/', device).then((res: any) => res.data);
 export const updateDevice = (id: number, device: Partial<Device>) => api.patch<Device>(`/devices/${id}`, device).then((res: any) => res.data);
 export const deleteDevice = (id: number) => api.delete(`/devices/${id}`).then((res: any) => res.data);

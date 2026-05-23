@@ -3,6 +3,8 @@ export interface Datacenter {
   name: string;
   address: string;
   description?: string;
+  width: number;
+  height: number;
 }
 
 export interface Rack {
