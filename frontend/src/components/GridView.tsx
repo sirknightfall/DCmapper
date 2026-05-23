@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getDatacenter, createRack, updateRack } from '../api';
+import { getDatacenter, createRack, updateRack, getDatacenterExportUrl } from '../api';
 import type { DatacenterWithRacks, Rack } from '../types';
-import { ChevronLeft, Plus, Move } from 'lucide-react';
+import { ChevronLeft, Plus, Move, Download } from 'lucide-react';
 import Modal from './Modal';
 
 const GridView: React.FC = () => {
@@ -102,16 +102,26 @@ const GridView: React.FC = () => {
           <h1 className="text-2xl font-bold">{dc.name}</h1>
           <p className="text-slate-600">{dc.address}</p>
         </div>
-        <button 
-          onClick={() => {
-            setError(null);
-            setIsModalOpen(true);
-          }}
-          className="flex items-center gap-1 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700"
-        >
-          <Plus size={18} />
-          <span>Place Rack</span>
-        </button>
+        <div className="flex gap-2">
+          <a 
+            href={getDatacenterExportUrl(dc.id)}
+            download
+            className="flex items-center gap-1 bg-slate-100 text-slate-700 px-4 py-2 rounded shadow-sm hover:bg-slate-200 transition-colors"
+          >
+            <Download size={18} />
+            <span>Export CSV</span>
+          </a>
+          <button 
+            onClick={() => {
+              setError(null);
+              setIsModalOpen(true);
+            }}
+            className="flex items-center gap-1 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={18} />
+            <span>Place Rack</span>
+          </button>
+        </div>
       </div>
 
       {error && !isModalOpen && !isMoveModalOpen && (

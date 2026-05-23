@@ -1,7 +1,11 @@
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
+from datetime import datetime
 import asyncio
+import csv
+import io
 from sqlmodel import Session, select, text
 from app.database import create_db_and_tables, get_session, engine
 from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory
@@ -12,7 +16,7 @@ from app.schemas import (
     SystemConfigRead, SystemConfigUpdate,
     StatusHistoryRead
 )
-from app.tasks import status_monitor_task
+from app.tasks import status_monitor_task, cleanup_deleted_devices_task
 
 app = FastAPI(title="DCmapper API")
 
@@ -27,7 +31,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def on_startup():
     create_db_and_tables()
-    
+
     # Simple migration: add width/height to datacenter if missing
     with Session(engine) as session:
         try:
@@ -35,7 +39,22 @@ async def on_startup():
             session.execute(text("ALTER TABLE datacenter ADD COLUMN height INTEGER DEFAULT 10"))
             session.commit()
         except Exception:
-            # Columns likely already exist
+            session.rollback()
+
+    # Simple migration: add deleted_at to device if missing
+    with Session(engine) as session:
+        try:
+            session.execute(text("ALTER TABLE device ADD COLUMN deleted_at DATETIME DEFAULT NULL"))
+            session.commit()
+        except Exception:
+            session.rollback()
+
+    # Simple migration: add retention_days to systemconfig if missing
+    with Session(engine) as session:
+        try:
+            session.execute(text("ALTER TABLE systemconfig ADD COLUMN retention_days INTEGER DEFAULT 365"))
+            session.commit()
+        except Exception:
             session.rollback()
 
     # Ensure default config exists
@@ -43,15 +62,15 @@ async def on_startup():
         with Session(engine) as session:
             config = session.exec(select(SystemConfig)).first()
             if not config:
-                config = SystemConfig(check_interval_seconds=60)
+                config = SystemConfig(check_interval_seconds=60, retention_days=365)
                 session.add(config)
                 session.commit()
     except Exception as e:
         print(f"Error initializing config: {e}")
-            
-    # Start the background ping task
-    asyncio.create_task(status_monitor_task())
 
+    # Start the background tasks
+    asyncio.create_task(status_monitor_task())
+    asyncio.create_task(cleanup_deleted_devices_task())
 # --- Datacenter Routes ---
 
 @app.post("/datacenters/", response_model=DatacenterRead)
@@ -74,6 +93,53 @@ def read_datacenter(dc_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Datacenter not found")
     return dc
 
+@app.get("/datacenters/{dc_id}/export")
+def export_datacenter_csv(dc_id: int, session: Session = Depends(get_session)):
+    dc = session.get(Datacenter, dc_id)
+    if not dc:
+        raise HTTPException(status_code=404, detail="Datacenter not found")
+    
+    # Get all racks in this DC
+    racks = session.exec(select(Rack).where(Rack.datacenter_id == dc_id)).all()
+    if not racks:
+        # Return empty CSV with headers
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Name", "Type", "Vendor/Model", "Rack", "Start U", "Height", "IP Addresses", "Status", "Deleted At"])
+        output.seek(0)
+        return Response(content=output.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=dc_{dc.name}_export.csv"})
+
+    rack_ids = [r.id for r in racks]
+    rack_map = {r.id: r.name for r in racks}
+    
+    # Get all devices in these racks, including deleted ones
+    statement = select(Device).where(Device.rack_id.in_(rack_ids))
+    devices = session.exec(statement).all()
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Headers
+    writer.writerow([
+        "Name", "Type", "Vendor/Model", "Rack", "Start U", "Height", 
+        "IP Addresses", "Mgmt IP", "Owner", "Status", "Last Checked", "Deleted At"
+    ])
+    
+    for d in devices:
+        writer.writerow([
+            d.name, d.device_type, d.vendor_model, rack_map.get(d.rack_id, "Unknown"), 
+            d.start_u, d.u_height, d.ip_addresses, d.management_ip, d.owner,
+            d.status, d.last_checked.isoformat() if d.last_checked else "Never",
+            d.deleted_at.isoformat() if d.deleted_at else "Active"
+        ])
+    
+    output.seek(0)
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=dc_{dc.name}_export.csv"}
+    )
+
 # --- Rack Routes ---
 
 @app.post("/racks/", response_model=RackRead)
@@ -94,6 +160,8 @@ def read_rack(rack_id: int, session: Session = Depends(get_session)):
     rack = session.get(Rack, rack_id)
     if not rack:
         raise HTTPException(status_code=404, detail="Rack not found")
+    # Filter out soft-deleted devices for the UI
+    rack.devices = [d for d in rack.devices if d.deleted_at is None]
     return rack
 
 @app.patch("/racks/{rack_id}", response_model=RackRead)
@@ -143,7 +211,7 @@ def validate_device_placement(session: Session, rack_id: int, start_u: int, u_he
         raise HTTPException(status_code=400, detail=f"Device exceeds rack height ({rack.height_u}U)")
     
     # Check for overlaps
-    statement = select(Device).where(Device.rack_id == rack_id)
+    statement = select(Device).where(Device.rack_id == rack_id).where(Device.deleted_at == None)
     if exclude_device_id:
         statement = statement.where(Device.id != exclude_device_id)
     
@@ -217,7 +285,9 @@ def delete_device(device_id: int, session: Session = Depends(get_session)):
     device = session.get(Device, device_id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    session.delete(device)
+    # Soft delete
+    device.deleted_at = datetime.utcnow()
+    session.add(device)
     session.commit()
     return {"ok": True}
 

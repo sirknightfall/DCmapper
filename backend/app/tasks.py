@@ -49,8 +49,8 @@ async def status_monitor_task():
             except Exception as e:
                 print(f"Error fetching config: {e}")
 
-            # Fetch all devices that have at least one IP address
-            statement = select(Device).where(Device.ip_addresses != "")
+            # Fetch all devices that have at least one IP address and are not deleted
+            statement = select(Device).where(Device.ip_addresses != "").where(Device.deleted_at == None)
             devices = session.exec(statement).all()
             
             for device in devices:
@@ -74,3 +74,32 @@ async def status_monitor_task():
         
         # Wait for the configured interval before the next check
         await asyncio.sleep(interval)
+
+async def cleanup_deleted_devices_task():
+    """
+    Background task that runs once a day to permanently remove devices
+    that have been soft-deleted for longer than the configured retention period.
+    """
+    while True:
+        try:
+            with Session(engine) as session:
+                # Fetch retention setting
+                retention_days = 365
+                config = session.exec(select(SystemConfig)).first()
+                if config:
+                    retention_days = config.retention_days
+                
+                # Calculate cutoff date
+                cutoff = datetime.utcnow() - timedelta(days=retention_days)
+                
+                # Find and delete devices soft-deleted before the cutoff
+                statement = delete(Device).where(Device.deleted_at != None).where(Device.deleted_at < cutoff)
+                session.exec(statement)
+                session.commit()
+                
+                print(f"Cleanup task: Pruned devices older than {retention_days} days.")
+        except Exception as e:
+            print(f"Error in cleanup task: {e}")
+        
+        # Run once every 24 hours
+        await asyncio.sleep(24 * 3600)

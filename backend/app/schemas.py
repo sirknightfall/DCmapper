@@ -59,6 +59,7 @@ class DeviceRead(DeviceBase):
     id: int
     status: str
     last_checked: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
 
 class DeviceUpdate(BaseModel):
     name: Optional[str] = None
@@ -80,9 +81,11 @@ class DeviceUpdate(BaseModel):
 class SystemConfigRead(BaseModel):
     id: int
     check_interval_seconds: int
+    retention_days: int
 
 class SystemConfigUpdate(BaseModel):
-    check_interval_seconds: int
+    check_interval_seconds: Optional[int] = None
+    retention_days: Optional[int] = None
 
 # Status History Schemas
 class StatusHistoryRead(BaseModel):

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getConfig, updateConfig } from '../api';
-import { Settings, Save, AlertCircle, CheckCircle } from 'lucide-react';
+import { Settings, Save, AlertCircle, CheckCircle, Database } from 'lucide-react';
 
 const Config: React.FC = () => {
   const [loading, setLoading] = useState(true);
@@ -8,11 +8,13 @@ const Config: React.FC = () => {
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   
   const [interval, setIntervalValue] = useState(60);
+  const [retention, setRetention] = useState(365);
 
   useEffect(() => {
     getConfig()
       .then(data => {
         setIntervalValue(data.check_interval_seconds);
+        setRetention(data.retention_days);
       })
       .catch(err => {
         console.error("Failed to fetch config:", err);
@@ -26,7 +28,10 @@ const Config: React.FC = () => {
     setIsSubmitting(true);
     setMessage(null);
 
-    updateConfig({ check_interval_seconds: interval })
+    updateConfig({ 
+      check_interval_seconds: interval,
+      retention_days: retention
+    })
       .then(() => {
         setMessage({ text: "Settings saved successfully.", type: 'success' });
       })
@@ -47,31 +52,64 @@ const Config: React.FC = () => {
       </div>
 
       <div className="bg-white border rounded-lg shadow-sm p-6">
-        <form onSubmit={handleSave} className="space-y-6">
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">
-              Status Check Interval (Seconds)
-            </label>
-            <p className="text-xs text-slate-500 mb-3">
-              How often the system should ping devices to update their Online/Offline status. 
-              Lower values provide more real-time data but increase network traffic.
+        <form onSubmit={handleSave} className="space-y-8">
+          {/* Status Check Section */}
+          <section>
+            <div className="flex items-center gap-2 mb-2">
+              <Settings size={16} className="text-blue-600" />
+              <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Monitoring</h2>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              Configure how often the system pings devices to update their Online/Offline status.
             </p>
             <div className="flex items-center gap-4">
-              <input 
-                type="number" 
-                min="5"
-                max="3600"
-                required
-                className="w-32 border rounded px-3 py-2 text-lg font-mono"
-                value={interval}
-                onChange={e => setIntervalValue(parseInt(e.target.value))}
-              />
-              <span className="text-slate-500">seconds</span>
+              <div className="flex-1 max-w-xs">
+                <label className="block text-xs font-medium text-slate-500 mb-1">Check Interval (Seconds)</label>
+                <input 
+                  type="number" 
+                  min="5"
+                  max="3600"
+                  required
+                  className="w-full border rounded px-3 py-2 text-lg font-mono"
+                  value={interval}
+                  onChange={e => setIntervalValue(parseInt(e.target.value))}
+                />
+              </div>
+              <span className="mt-5 text-slate-400 text-sm">seconds</span>
+            </div>
+          </section>
+
+          <hr className="border-slate-100" />
+
+          {/* Retention Section */}
+          <section>
+            <div className="flex items-center gap-2 mb-2">
+              <Database size={16} className="text-blue-600" />
+              <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Data Retention</h2>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              How long should "soft-deleted" servers be kept in the database before being permanently removed?
+              These servers will appear in CSV exports until pruned.
+            </p>
+            <div className="flex items-center gap-4">
+              <div className="flex-1 max-w-xs">
+                <label className="block text-xs font-medium text-slate-500 mb-1">Retention Period (Days)</label>
+                <input 
+                  type="number" 
+                  min="1"
+                  max="3650"
+                  required
+                  className="w-full border rounded px-3 py-2 text-lg font-mono"
+                  value={retention}
+                  onChange={e => setRetention(parseInt(e.target.value))}
+                />
+              </div>
+              <span className="mt-5 text-slate-400 text-sm">days</span>
             </div>
             <p className="text-[10px] text-slate-400 mt-2 italic">
-              Range: 5s to 3600s (1 hour). Default: 60s.
+              Range: 1 to 3650 days (10 years). Default: 365.
             </p>
-          </div>
+          </section>
 
           {message && (
             <div className={`flex items-center gap-2 p-3 rounded text-sm ${
@@ -96,11 +134,11 @@ const Config: React.FC = () => {
       </div>
 
       <div className="mt-8 bg-slate-50 border border-dashed rounded-lg p-4">
-        <h3 className="text-sm font-bold text-slate-600 mb-2">Background Monitoring Info</h3>
+        <h3 className="text-sm font-bold text-slate-600 mb-2">Background Maintenance</h3>
         <ul className="text-xs text-slate-500 space-y-1 list-disc pl-4">
-          <li>The status monitor runs as a persistent background task on the server.</li>
-          <li>Changing the interval will take effect after the current wait cycle completes.</li>
-          <li>Pings are performed sequentially for all devices with an IP address.</li>
+          <li>The status monitor runs based on the interval configured above.</li>
+          <li>The cleanup task runs once every 24 hours to prune old deleted servers.</li>
+          <li>Pruning is permanent and cannot be undone.</li>
         </ul>
       </div>
     </div>

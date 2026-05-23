@@ -43,6 +43,7 @@ export interface RackWithDevices extends Rack {
 export interface SystemConfig {
   id: number;
   check_interval_seconds: number;
+  retention_days: number;
 }
 
 export interface StatusHistory {

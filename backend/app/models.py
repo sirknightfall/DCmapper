@@ -48,6 +48,7 @@ class Device(SQLModel, table=True):
     # Status
     status: str = Field(default="Unknown") # Online, Offline, Unknown
     last_checked: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
     
     rack: Rack = Relationship(back_populates="devices")
     status_history: List["StatusHistory"] = Relationship(back_populates="device")
@@ -63,4 +64,5 @@ class StatusHistory(SQLModel, table=True):
 class SystemConfig(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     check_interval_seconds: int = Field(default=60)
+    retention_days: int = Field(default=365)
 

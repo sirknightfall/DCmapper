@@ -29,3 +29,5 @@ export const getConfig = () => api.get<SystemConfig>('/config/').then((res: any)
 export const updateConfig = (config: Partial<SystemConfig>) => api.patch<SystemConfig>('/config/', config).then((res: any) => res.data);
 
 export const getDeviceHistory = (deviceId: number) => api.get<StatusHistory[]>(`/devices/${deviceId}/history`).then((res: any) => res.data);
+
+export const getDatacenterExportUrl = (dcId: number) => `${API_URL}/datacenters/${dcId}/export`;
