@@ -4,9 +4,11 @@ import { getDatacenter, createRack, updateRack, getDatacenterExportUrl } from '.
 import type { DatacenterWithRacks, Rack } from '../types';
 import { ChevronLeft, Plus, Move, Download } from 'lucide-react';
 import Modal from './Modal';
+import { useAuth } from '../context/AuthContext';
 
 const GridView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const { isAdmin } = useAuth();
   const [dc, setDc] = useState<DatacenterWithRacks | null>(null);
   const [loading, setLoading] = useState(true);
   
@@ -40,7 +42,7 @@ const GridView: React.FC = () => {
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (id) {
+    if (id && isAdmin) {
       setIsSubmitting(true);
       setError(null);
       createRack({ ...newRack, datacenter_id: parseInt(id) })
@@ -66,7 +68,7 @@ const GridView: React.FC = () => {
 
   const handleMove = (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedRack) {
+    if (selectedRack && isAdmin) {
       setIsSubmitting(true);
       setError(null);
       updateRack(selectedRack.id, { x_coord: moveData.x, y_coord: moveData.y })
@@ -111,16 +113,18 @@ const GridView: React.FC = () => {
             <Download size={18} />
             <span>Export CSV</span>
           </a>
-          <button 
-            onClick={() => {
-              setError(null);
-              setIsModalOpen(true);
-            }}
-            className="flex items-center gap-1 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition-colors"
-          >
-            <Plus size={18} />
-            <span>Place Rack</span>
-          </button>
+          {isAdmin && (
+            <button 
+              onClick={() => {
+                setError(null);
+                setIsModalOpen(true);
+              }}
+              className="flex items-center gap-1 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition-colors"
+            >
+              <Plus size={18} />
+              <span>Place Rack</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -151,21 +155,25 @@ const GridView: React.FC = () => {
                       <Link to={`/rack/${rack.id}`} className="absolute inset-0 flex items-center justify-center text-[10px] font-bold z-0">
                         {rack.name}
                       </Link>
-                      <button 
-                        onClick={() => openMoveModal(rack)}
-                        className="absolute top-0 right-0 p-1 bg-blue-600 text-white rounded-bl opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                        title="Move Rack"
-                      >
-                        <Move size={10} />
-                      </button>
+                      {isAdmin && (
+                        <button 
+                          onClick={() => openMoveModal(rack)}
+                          className="absolute top-0 right-0 p-1 bg-blue-600 text-white rounded-bl opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                          title="Move Rack"
+                        >
+                          <Move size={10} />
+                        </button>
+                      )}
                     </>
                   ) : (
                     <span 
-                      className="text-slate-200 text-[8px] cursor-pointer hover:text-blue-400 w-full h-full flex items-center justify-center"
+                      className={`text-slate-200 text-[8px] flex items-center justify-center w-full h-full ${isAdmin ? 'cursor-pointer hover:text-blue-400' : ''}`}
                       onClick={() => {
-                        setError(null);
-                        setNewRack({ ...newRack, x_coord: x, y_coord: y });
-                        setIsModalOpen(true);
+                        if (isAdmin) {
+                          setError(null);
+                          setNewRack({ ...newRack, x_coord: x, y_coord: y });
+                          setIsModalOpen(true);
+                        }
                       }}
                     >
                       {x},{y}

@@ -100,3 +100,26 @@ class RackWithDevices(RackRead):
 
 class DatacenterWithRacks(DatacenterRead):
     racks: List[RackRead] = []
+
+# Auth Schemas
+class UserRead(BaseModel):
+    id: int
+    username: str
+    role: str
+    is_active: bool
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: Optional[str] = "viewer"
+
+class UserUpdatePassword(BaseModel):
+    new_password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+    role: Optional[str] = None

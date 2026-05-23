@@ -66,3 +66,11 @@ class SystemConfig(SQLModel, table=True):
     check_interval_seconds: int = Field(default=60)
     retention_days: int = Field(default=365)
 
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str = Field(unique=True, index=True)
+    hashed_password: str
+    role: str = Field(default="viewer") # admin, viewer
+    is_active: bool = Field(default=True)
+    last_login: Optional[datetime] = None
+

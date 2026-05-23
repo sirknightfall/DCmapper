@@ -1,22 +1,28 @@
-from fastapi import FastAPI, Depends, HTTPException, Query, Response
+from fastapi import FastAPI, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
+from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 import csv
 import io
 from sqlmodel import Session, select, text
 from app.database import create_db_and_tables, get_session, engine
-from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory
+from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory, User
 from app.schemas import (
     DatacenterCreate, DatacenterRead, DatacenterWithRacks,
     RackCreate, RackRead, RackWithDevices, RackUpdate,
     DeviceCreate, DeviceRead, DeviceUpdate,
     SystemConfigRead, SystemConfigUpdate,
-    StatusHistoryRead
+    StatusHistoryRead,
+    UserRead, UserCreate, UserUpdatePassword, Token
 )
 from app.tasks import status_monitor_task, cleanup_deleted_devices_task
+from app.auth import (
+    get_password_hash, create_access_token, verify_password,
+    get_current_active_user, require_admin, ACCESS_TOKEN_EXPIRE_MINUTES
+)
 
 app = FastAPI(title="DCmapper API")
 
@@ -68,13 +74,135 @@ async def on_startup():
     except Exception as e:
         print(f"Error initializing config: {e}")
 
+    # Ensure default users exist
+    with Session(engine) as session:
+        try:
+            admin = session.exec(select(User).where(User.username == "admin")).first()
+            if not admin:
+                print("Creating default admin user...")
+                admin = User(
+                    username="admin",
+                    hashed_password=get_password_hash("admin"),
+                    role="admin"
+                )
+                session.add(admin)
+                session.commit()
+                print("Admin user created successfully.")
+            else:
+                print("Admin user already exists.")
+        except Exception as e:
+            print(f"Error initializing admin user: {e}")
+            session.rollback()
+        
+        try:
+            viewer = session.exec(select(User).where(User.username == "viewer")).first()
+            if not viewer:
+                print("Creating default viewer user...")
+                viewer = User(
+                    username="viewer",
+                    hashed_password=get_password_hash("viewer"),
+                    role="viewer"
+                )
+                session.add(viewer)
+                session.commit()
+                print("Viewer user created successfully.")
+            else:
+                print("Viewer user already exists.")
+        except Exception as e:
+            print(f"Error initializing viewer user: {e}")
+            session.rollback()
+
     # Start the background tasks
     asyncio.create_task(status_monitor_task())
     asyncio.create_task(cleanup_deleted_devices_task())
+
+# --- Auth Routes ---
+
+@app.post("/token", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), session: Session = Depends(get_session)):
+    user = session.exec(select(User).where(User.username == form_data.username)).first()
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username, "role": user.role}, 
+        expires_delta=access_token_expires
+    )
+    
+    user.last_login = datetime.utcnow()
+    session.add(user)
+    session.commit()
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/users/me/", response_model=UserRead)
+async def read_users_me(current_user: User = Depends(get_current_active_user)):
+    return current_user
+
+@app.patch("/users/me/password", response_model=UserRead)
+async def update_own_password(update: UserUpdatePassword, session: Session = Depends(get_session), current_user: User = Depends(get_current_active_user)):
+    current_user.hashed_password = get_password_hash(update.new_password)
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return current_user
+
+@app.get("/users/", response_model=List[UserRead])
+async def read_users(session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    users = session.exec(select(User)).all()
+    return users
+
+@app.post("/users/", response_model=UserRead)
+async def create_user(user: UserCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    # Check if exists
+    existing = session.exec(select(User).where(User.username == user.username)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    
+    db_user = User(
+        username=user.username,
+        hashed_password=get_password_hash(user.password),
+        role=user.role
+    )
+    session.add(db_user)
+    session.commit()
+    session.refresh(db_user)
+    return db_user
+
+@app.patch("/users/{user_id}/password", response_model=UserRead)
+async def reset_user_password(user_id: int, update: UserUpdatePassword, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    db_user = session.get(User, user_id)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    db_user.hashed_password = get_password_hash(update.new_password)
+    session.add(db_user)
+    session.commit()
+    session.refresh(db_user)
+    return db_user
+
+@app.delete("/users/{user_id}")
+async def delete_user(user_id: int, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
+    db_user = session.get(User, user_id)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if db_user.username == current_user.username:
+        raise HTTPException(status_code=400, detail="Cannot delete your own user")
+    
+    session.delete(db_user)
+    session.commit()
+    return {"ok": True}
+
 # --- Datacenter Routes ---
 
 @app.post("/datacenters/", response_model=DatacenterRead)
-def create_datacenter(dc: DatacenterCreate, session: Session = Depends(get_session)):
+def create_datacenter(dc: DatacenterCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     db_dc = Datacenter.from_orm(dc)
     session.add(db_dc)
     session.commit()
@@ -82,19 +210,19 @@ def create_datacenter(dc: DatacenterCreate, session: Session = Depends(get_sessi
     return db_dc
 
 @app.get("/datacenters/", response_model=List[DatacenterRead])
-def read_datacenters(offset: int = 0, limit: int = Query(default=100, le=100), session: Session = Depends(get_session)):
+def read_datacenters(offset: int = 0, limit: int = Query(default=100, le=100), session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     datacenters = session.exec(select(Datacenter).offset(offset).limit(limit)).all()
     return datacenters
 
 @app.get("/datacenters/{dc_id}", response_model=DatacenterWithRacks)
-def read_datacenter(dc_id: int, session: Session = Depends(get_session)):
+def read_datacenter(dc_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     dc = session.get(Datacenter, dc_id)
     if not dc:
         raise HTTPException(status_code=404, detail="Datacenter not found")
     return dc
 
 @app.get("/datacenters/{dc_id}/export")
-def export_datacenter_csv(dc_id: int, session: Session = Depends(get_session)):
+def export_datacenter_csv(dc_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     dc = session.get(Datacenter, dc_id)
     if not dc:
         raise HTTPException(status_code=404, detail="Datacenter not found")
@@ -143,7 +271,7 @@ def export_datacenter_csv(dc_id: int, session: Session = Depends(get_session)):
 # --- Rack Routes ---
 
 @app.post("/racks/", response_model=RackRead)
-def create_rack(rack: RackCreate, session: Session = Depends(get_session)):
+def create_rack(rack: RackCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     db_rack = Rack.from_orm(rack)
     session.add(db_rack)
     session.commit()
@@ -151,12 +279,12 @@ def create_rack(rack: RackCreate, session: Session = Depends(get_session)):
     return db_rack
 
 @app.get("/racks/", response_model=List[RackRead])
-def read_racks(offset: int = 0, limit: int = Query(default=100, le=100), session: Session = Depends(get_session)):
+def read_racks(offset: int = 0, limit: int = Query(default=100, le=100), session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     racks = session.exec(select(Rack).offset(offset).limit(limit)).all()
     return racks
 
 @app.get("/racks/{rack_id}", response_model=RackWithDevices)
-def read_rack(rack_id: int, session: Session = Depends(get_session)):
+def read_rack(rack_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     rack = session.get(Rack, rack_id)
     if not rack:
         raise HTTPException(status_code=404, detail="Rack not found")
@@ -165,7 +293,7 @@ def read_rack(rack_id: int, session: Session = Depends(get_session)):
     return rack
 
 @app.patch("/racks/{rack_id}", response_model=RackRead)
-def update_rack(rack_id: int, rack_update: RackUpdate, session: Session = Depends(get_session)):
+def update_rack(rack_id: int, rack_update: RackUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     db_rack = session.get(Rack, rack_id)
     if not db_rack:
         raise HTTPException(status_code=404, detail="Rack not found")
@@ -228,7 +356,7 @@ def validate_device_placement(session: Session, rack_id: int, start_u: int, u_he
             )
 
 @app.post("/devices/", response_model=DeviceRead)
-def create_device(device: DeviceCreate, session: Session = Depends(get_session)):
+def create_device(device: DeviceCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     validate_device_placement(session, device.rack_id, device.start_u, device.u_height)
     db_device = Device.from_orm(device)
     session.add(db_device)
@@ -237,14 +365,14 @@ def create_device(device: DeviceCreate, session: Session = Depends(get_session))
     return db_device
 
 @app.get("/devices/{device_id}", response_model=DeviceRead)
-def read_device(device_id: int, session: Session = Depends(get_session)):
+def read_device(device_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     device = session.get(Device, device_id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     return device
 
 @app.patch("/devices/{device_id}", response_model=DeviceRead)
-def update_device(device_id: int, device_update: DeviceUpdate, session: Session = Depends(get_session)):
+def update_device(device_id: int, device_update: DeviceUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     db_device = session.get(Device, device_id)
     if not db_device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -270,7 +398,7 @@ def update_device(device_id: int, device_update: DeviceUpdate, session: Session 
     return db_device
 
 @app.get("/devices/{device_id}/history", response_model=List[StatusHistoryRead])
-def read_device_history(device_id: int, session: Session = Depends(get_session)):
+def read_device_history(device_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     device = session.get(Device, device_id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -281,7 +409,7 @@ def read_device_history(device_id: int, session: Session = Depends(get_session))
     return history
 
 @app.delete("/devices/{device_id}")
-def delete_device(device_id: int, session: Session = Depends(get_session)):
+def delete_device(device_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     device = session.get(Device, device_id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -294,23 +422,27 @@ def delete_device(device_id: int, session: Session = Depends(get_session)):
 # --- Config Routes ---
 
 @app.get("/config/", response_model=SystemConfigRead)
-def get_config(session: Session = Depends(get_session)):
+def get_config(session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     config = session.exec(select(SystemConfig)).first()
     if not config:
         # Fallback if somehow missing
-        config = SystemConfig(check_interval_seconds=60)
+        config = SystemConfig(check_interval_seconds=60, retention_days=365)
         session.add(config)
         session.commit()
         session.refresh(config)
     return config
 
 @app.patch("/config/", response_model=SystemConfigRead)
-def update_config(config_update: SystemConfigUpdate, session: Session = Depends(get_session)):
+def update_config(config_update: SystemConfigUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     config = session.exec(select(SystemConfig)).first()
     if not config:
         config = SystemConfig()
     
-    config.check_interval_seconds = config_update.check_interval_seconds
+    if config_update.check_interval_seconds is not None:
+        config.check_interval_seconds = config_update.check_interval_seconds
+    if config_update.retention_days is not None:
+        config.retention_days = config_update.retention_days
+        
     session.add(config)
     session.commit()
     session.refresh(config)

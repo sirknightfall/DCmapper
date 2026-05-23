@@ -4,8 +4,10 @@ import { getDatacenters, createDatacenter } from '../api';
 import type { Datacenter } from '../types';
 import { MapPin, Info, Plus } from 'lucide-react';
 import Modal from './Modal';
+import { useAuth } from '../context/AuthContext';
 
 const Dashboard: React.FC = () => {
+  const { isAdmin } = useAuth();
   const [datacenters, setDatacenters] = useState<Datacenter[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -60,16 +62,18 @@ const Dashboard: React.FC = () => {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Datacenter Locations</h1>
-        <button 
-          onClick={() => {
-            setError(null);
-            setIsModalOpen(true);
-          }}
-          className="flex items-center gap-1 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={18} />
-          <span>Add Location</span>
-        </button>
+        {isAdmin && (
+          <button 
+            onClick={() => {
+              setError(null);
+              setIsModalOpen(true);
+            }}
+            className="flex items-center gap-1 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={18} />
+            <span>Add Location</span>
+          </button>
+        )}
       </div>
 
       {error && (

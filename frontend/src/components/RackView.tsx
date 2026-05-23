@@ -4,9 +4,11 @@ import { getRack, createDevice, updateDevice, deleteDevice, getDatacenters, getR
 import type { RackWithDevices, Device, Datacenter, Rack, StatusHistory } from '../types';
 import { ChevronLeft, Plus, ExternalLink, Activity, Trash2, Move, Edit2, Clock } from 'lucide-react';
 import Modal from './Modal';
+import { useAuth } from '../context/AuthContext';
 
 const RackView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const { isAdmin } = useAuth();
   const [rack, setRack] = useState<RackWithDevices | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +63,10 @@ const RackView: React.FC = () => {
       setLoading(true);
       getRack(parseInt(id))
         .then(setRack)
+        .catch(err => {
+          console.error("Failed to fetch rack:", err);
+          setError("Failed to load rack inventory.");
+        })
         .finally(() => setLoading(false));
     }
   };
@@ -85,9 +91,11 @@ const RackView: React.FC = () => {
   };
 
   const handleDelete = (deviceId: number) => {
-    if (window.confirm('Are you sure you want to delete this device?')) {
+    if (isAdmin && window.confirm('Are you sure you want to delete this device?')) {
       deleteDevice(deviceId).then(() => {
         fetchRack();
+      }).catch(err => {
+        alert(err.response?.data?.detail || "Failed to delete device.");
       });
     }
   };
@@ -136,7 +144,7 @@ const RackView: React.FC = () => {
   const handleMove = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (selectedDevice) {
+    if (selectedDevice && isAdmin) {
       updateDevice(selectedDevice.id, { 
         rack_id: moveData.rackId, 
         start_u: moveData.startU 
@@ -152,7 +160,7 @@ const RackView: React.FC = () => {
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (selectedDevice) {
+    if (selectedDevice && isAdmin) {
       updateDevice(selectedDevice.id, editDeviceData).then(() => {
         setIsEditModalOpen(false);
         fetchRack();
@@ -165,7 +173,7 @@ const RackView: React.FC = () => {
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (id) {
+    if (id && isAdmin) {
       createDevice({ ...newDevice, rack_id: parseInt(id) }).then(() => {
         setIsModalOpen(false);
         setNewDevice({
@@ -211,18 +219,23 @@ const RackView: React.FC = () => {
           <h1 className="text-2xl font-bold">{rack.name}</h1>
           <p className="text-slate-600">{rack.height_u}U Server Rack</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-1 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700"
-        >
-          <Plus size={18} />
-          <span>Add Device</span>
-        </button>
+        {isAdmin && (
+          <button 
+            onClick={() => {
+              setError(null);
+              setIsModalOpen(true);
+            }}
+            className="flex items-center gap-1 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={18} />
+            <span>Add Device</span>
+          </button>
+        )}
       </div>
 
       <div className="flex flex-col md:flex-row gap-8">
-        <div className="bg-slate-300 p-4 rounded-t-xl border-x-8 border-t-8 border-slate-400 w-full md:w-96">
-          <div className="flex flex-col gap-1 bg-slate-900 p-2 min-h-[600px]">
+        <div className="bg-slate-300 p-4 rounded-t-xl border-x-8 border-t-8 border-slate-400 w-full md:w-96 shadow-inner">
+          <div className="flex flex-col gap-1 bg-slate-900 p-2 min-h-[600px] rounded border border-slate-950">
             {uSlots.map(u => {
               const device = getDeviceAtU(u);
               const isStart = device?.start_u === u;
@@ -232,16 +245,23 @@ const RackView: React.FC = () => {
               return (
                 <div 
                   key={u}
-                  className={`relative flex items-center px-3 border border-slate-800 rounded text-xs font-mono
-                    ${device ? 'bg-blue-900 text-blue-100 cursor-pointer hover:bg-blue-800' : 'bg-slate-800 text-slate-500 cursor-pointer hover:bg-slate-700'}
+                  className={`relative flex items-center px-3 border border-slate-800 rounded text-xs font-mono transition-colors
+                    ${device ? 'bg-blue-900 text-blue-100 cursor-pointer hover:bg-blue-800' : 
+                      isAdmin ? 'bg-slate-800 text-slate-500 cursor-pointer hover:bg-slate-700' : 'bg-slate-800 text-slate-600 cursor-default'}
                   `}
                   style={{ height: device ? `${device.u_height * 2.5}rem` : '2rem' }}
                   onClick={() => {
                     if (!device) {
-                      setNewDevice({ ...newDevice, start_u: u });
-                      setIsModalOpen(true);
+                      if (isAdmin) {
+                        setNewDevice({ ...newDevice, start_u: u });
+                        setIsModalOpen(true);
+                      }
                     } else if (isStart) {
-                      openEditModal(device);
+                      if (isAdmin) {
+                        openEditModal(device);
+                      } else {
+                        openHistoryModal(device);
+                      }
                     }
                   }}
                 >
@@ -305,27 +325,31 @@ const RackView: React.FC = () => {
                       >
                         <Clock size={16} />
                       </button>
-                      <button 
-                        onClick={() => openEditModal(device)}
-                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                        title="Edit Device"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      <button 
-                        onClick={() => openMoveModal(device)}
-                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                        title="Move Device"
-                      >
-                        <Move size={16} />
-                      </button>
-                      <button 
-                        onClick={() => handleDelete(device.id)}
-                        className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                        title="Delete Device"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      {isAdmin && (
+                        <>
+                          <button 
+                            onClick={() => openEditModal(device)}
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            title="Edit Device"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button 
+                            onClick={() => openMoveModal(device)}
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            title="Move Device"
+                          >
+                            <Move size={16} />
+                          </button>
+                          <button 
+                            onClick={() => handleDelete(device.id)}
+                            className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="Delete Device"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
