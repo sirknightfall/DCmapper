@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Datacenter, DatacenterWithRacks, Rack, RackWithDevices, Device } from './types';
+import type { Datacenter, DatacenterWithRacks, Rack, RackWithDevices, Device, SystemConfig, StatusHistory } from './types';
 
 const getBaseUrl = () => {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
@@ -23,3 +23,8 @@ export const createRack = (rack: Omit<Rack, 'id'>) => api.post<Rack>('/racks/', 
 export const createDevice = (device: any) => api.post<Device>('/devices/', device).then((res: any) => res.data);
 export const updateDevice = (id: number, device: Partial<Device>) => api.patch<Device>(`/devices/${id}`, device).then((res: any) => res.data);
 export const deleteDevice = (id: number) => api.delete(`/devices/${id}`).then((res: any) => res.data);
+
+export const getConfig = () => api.get<SystemConfig>('/config/').then((res: any) => res.data);
+export const updateConfig = (config: Partial<SystemConfig>) => api.patch<SystemConfig>('/config/', config).then((res: any) => res.data);
+
+export const getDeviceHistory = (deviceId: number) => api.get<StatusHistory[]>(`/devices/${deviceId}/history`).then((res: any) => res.data);

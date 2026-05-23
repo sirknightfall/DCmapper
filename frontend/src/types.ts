@@ -37,3 +37,15 @@ export interface DatacenterWithRacks extends Datacenter {
 export interface RackWithDevices extends Rack {
   devices: Device[];
 }
+
+export interface SystemConfig {
+  id: number;
+  check_interval_seconds: number;
+}
+
+export interface StatusHistory {
+  id: number;
+  device_id: number;
+  status: 'Online' | 'Offline';
+  timestamp: string;
+}

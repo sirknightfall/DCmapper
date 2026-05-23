@@ -68,6 +68,21 @@ class DeviceUpdate(BaseModel):
     installation_date: Optional[datetime] = None
     status: Optional[str] = None
 
+# System Config Schemas
+class SystemConfigRead(BaseModel):
+    id: int
+    check_interval_seconds: int
+
+class SystemConfigUpdate(BaseModel):
+    check_interval_seconds: int
+
+# Status History Schemas
+class StatusHistoryRead(BaseModel):
+    id: int
+    device_id: int
+    status: str
+    timestamp: datetime
+
 # Nested relations for drill-down views
 class RackWithDevices(RackRead):
     devices: List[DeviceRead] = []

@@ -48,3 +48,17 @@ class Device(SQLModel, table=True):
     last_checked: Optional[datetime] = None
     
     rack: Rack = Relationship(back_populates="devices")
+    status_history: List["StatusHistory"] = Relationship(back_populates="device")
+
+class StatusHistory(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    device_id: int = Field(foreign_key="device.id")
+    status: str # Online, Offline
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+    device: Device = Relationship(back_populates="status_history")
+
+class SystemConfig(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    check_interval_seconds: int = Field(default=60)
+

@@ -3,12 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import asyncio
 from sqlmodel import Session, select
-from app.database import create_db_and_tables, get_session
-from app.models import Datacenter, Rack, Device
+from app.database import create_db_and_tables, get_session, engine
+from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory
 from app.schemas import (
     DatacenterCreate, DatacenterRead, DatacenterWithRacks,
     RackCreate, RackRead, RackWithDevices,
-    DeviceCreate, DeviceRead, DeviceUpdate
+    DeviceCreate, DeviceRead, DeviceUpdate,
+    SystemConfigRead, SystemConfigUpdate,
+    StatusHistoryRead
 )
 from app.tasks import status_monitor_task
 
@@ -25,6 +27,14 @@ app.add_middleware(
 @app.on_event("startup")
 async def on_startup():
     create_db_and_tables()
+    # Ensure default config exists
+    with Session(engine) as session:
+        config = session.exec(select(SystemConfig)).first()
+        if not config:
+            config = SystemConfig(check_interval_seconds=60)
+            session.add(config)
+            session.commit()
+            
     # Start the background ping task
     asyncio.create_task(status_monitor_task())
 
@@ -74,8 +84,37 @@ def read_rack(rack_id: int, session: Session = Depends(get_session)):
 
 # --- Device Routes ---
 
+def validate_device_placement(session: Session, rack_id: int, start_u: int, u_height: int, exclude_device_id: int = None):
+    rack = session.get(Rack, rack_id)
+    if not rack:
+        raise HTTPException(status_code=404, detail="Target rack not found")
+    
+    # Check rack height constraints
+    if start_u < 1:
+        raise HTTPException(status_code=400, detail="Start U must be at least 1")
+    if start_u + u_height - 1 > rack.height_u:
+        raise HTTPException(status_code=400, detail=f"Device exceeds rack height ({rack.height_u}U)")
+    
+    # Check for overlaps
+    statement = select(Device).where(Device.rack_id == rack_id)
+    if exclude_device_id:
+        statement = statement.where(Device.id != exclude_device_id)
+    
+    existing_devices = session.exec(statement).all()
+    
+    proposed_end = start_u + u_height
+    for device in existing_devices:
+        device_end = device.start_u + device.u_height
+        # Overlap if: (StartA < EndB) and (StartB < EndA)
+        if start_u < device_end and device.start_u < proposed_end:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Placement overlap with device '{device.name}' ({device.start_u}U-{device_end-1}U)"
+            )
+
 @app.post("/devices/", response_model=DeviceRead)
 def create_device(device: DeviceCreate, session: Session = Depends(get_session)):
+    validate_device_placement(session, device.rack_id, device.start_u, device.u_height)
     db_device = Device.from_orm(device)
     session.add(db_device)
     session.commit()
@@ -95,6 +134,17 @@ def update_device(device_id: int, device_update: DeviceUpdate, session: Session 
     if not db_device:
         raise HTTPException(status_code=404, detail="Device not found")
     
+    # Determine new values for validation
+    new_rack_id = device_update.rack_id if device_update.rack_id is not None else db_device.rack_id
+    new_start_u = device_update.start_u if device_update.start_u is not None else db_device.start_u
+    new_u_height = device_update.u_height if device_update.u_height is not None else db_device.u_height
+    
+    # Validate if position or rack changed
+    if (new_rack_id != db_device.rack_id or 
+        new_start_u != db_device.start_u or 
+        new_u_height != db_device.u_height):
+        validate_device_placement(session, new_rack_id, new_start_u, new_u_height, exclude_device_id=device_id)
+
     device_data = device_update.dict(exclude_unset=True)
     for key, value in device_data.items():
         setattr(db_device, key, value)
@@ -104,6 +154,17 @@ def update_device(device_id: int, device_update: DeviceUpdate, session: Session 
     session.refresh(db_device)
     return db_device
 
+@app.get("/devices/{device_id}/history", response_model=List[StatusHistoryRead])
+def read_device_history(device_id: int, session: Session = Depends(get_session)):
+    device = session.get(Device, device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    # Return history ordered by timestamp
+    statement = select(StatusHistory).where(StatusHistory.device_id == device_id).order_by(StatusHistory.timestamp)
+    history = session.exec(statement).all()
+    return history
+
 @app.delete("/devices/{device_id}")
 def delete_device(device_id: int, session: Session = Depends(get_session)):
     device = session.get(Device, device_id)
@@ -112,3 +173,28 @@ def delete_device(device_id: int, session: Session = Depends(get_session)):
     session.delete(device)
     session.commit()
     return {"ok": True}
+
+# --- Config Routes ---
+
+@app.get("/config/", response_model=SystemConfigRead)
+def get_config(session: Session = Depends(get_session)):
+    config = session.exec(select(SystemConfig)).first()
+    if not config:
+        # Fallback if somehow missing
+        config = SystemConfig(check_interval_seconds=60)
+        session.add(config)
+        session.commit()
+        session.refresh(config)
+    return config
+
+@app.patch("/config/", response_model=SystemConfigRead)
+def update_config(config_update: SystemConfigUpdate, session: Session = Depends(get_session)):
+    config = session.exec(select(SystemConfig)).first()
+    if not config:
+        config = SystemConfig()
+    
+    config.check_interval_seconds = config_update.check_interval_seconds
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+    return config

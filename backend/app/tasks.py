@@ -1,10 +1,10 @@
 import asyncio
 import subprocess
 import platform
-from datetime import datetime
-from sqlmodel import Session, select
+from datetime import datetime, timedelta
+from sqlmodel import Session, select, delete
 from app.database import engine
-from app.models import Device
+from app.models import Device, SystemConfig, StatusHistory
 
 async def ping_device(ip: str) -> bool:
     """
@@ -31,7 +31,24 @@ async def status_monitor_task():
     Background task that periodically pings all devices with an IP address.
     """
     while True:
+        interval = 60
         with Session(engine) as session:
+            # Cleanup history older than 24 hours
+            try:
+                cutoff = datetime.utcnow() - timedelta(hours=24)
+                session.exec(delete(StatusHistory).where(StatusHistory.timestamp < cutoff))
+                session.commit()
+            except Exception as e:
+                print(f"Error cleaning up history: {e}")
+
+            # Fetch config
+            try:
+                config = session.exec(select(SystemConfig)).first()
+                if config:
+                    interval = config.check_interval_seconds
+            except Exception as e:
+                print(f"Error fetching config: {e}")
+
             # Fetch all devices that have at least one IP address
             statement = select(Device).where(Device.ip_addresses != "")
             devices = session.exec(statement).all()
@@ -43,11 +60,17 @@ async def status_monitor_task():
                 
                 if primary_ip:
                     is_online = await ping_device(primary_ip)
-                    device.status = "Online" if is_online else "Offline"
+                    new_status = "Online" if is_online else "Offline"
+                    
+                    device.status = new_status
                     device.last_checked = datetime.utcnow()
                     session.add(device)
+
+                    # Record history
+                    history = StatusHistory(device_id=device.id, status=new_status)
+                    session.add(history)
             
             session.commit()
         
-        # Wait for 60 seconds before the next check
-        await asyncio.sleep(60)
+        # Wait for the configured interval before the next check
+        await asyncio.sleep(interval)

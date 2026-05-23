@@ -1,17 +1,25 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getRack, createDevice, updateDevice, deleteDevice, getDatacenters, getRacks } from '../api';
-import type { RackWithDevices, Device, Datacenter, Rack } from '../types';
-import { ChevronLeft, Plus, ExternalLink, Activity, Trash2, Move } from 'lucide-react';
+import { getRack, createDevice, updateDevice, deleteDevice, getDatacenters, getRacks, getDeviceHistory } from '../api';
+import type { RackWithDevices, Device, Datacenter, Rack, StatusHistory } from '../types';
+import { ChevronLeft, Plus, ExternalLink, Activity, Trash2, Move, Edit2, Clock } from 'lucide-react';
 import Modal from './Modal';
 
 const RackView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [rack, setRack] = useState<RackWithDevices | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [historyData, setHistoryData] = useState<StatusHistory[]>([]);
+  
   const [allDCs, setAllDCs] = useState<Datacenter[]>([]);
   const [allRacks, setAllRacks] = useState<Rack[]>([]);
   const [moveData, setMoveData] = useState({
@@ -29,7 +37,23 @@ const RackView: React.FC = () => {
     u_height: 1,
     ip_addresses: '',
     management_ip: '',
-    management_link: ''
+    management_link: '',
+    owner: '',
+    network_ports: ''
+  });
+
+  const [editDeviceData, setEditDeviceData] = useState({
+    name: '',
+    description: '',
+    device_type: 'Server',
+    vendor_model: '',
+    start_u: 1,
+    u_height: 1,
+    ip_addresses: '',
+    management_ip: '',
+    management_link: '',
+    owner: '',
+    network_ports: ''
   });
 
   const fetchRack = () => {
@@ -52,6 +76,14 @@ const RackView: React.FC = () => {
     fetchRack();
   }, [id]);
 
+  const clearModals = () => {
+    setIsModalOpen(false);
+    setIsEditModalOpen(false);
+    setIsMoveModalOpen(false);
+    setIsHistoryModalOpen(false);
+    setError(null);
+  };
+
   const handleDelete = (deviceId: number) => {
     if (window.confirm('Are you sure you want to delete this device?')) {
       deleteDevice(deviceId).then(() => {
@@ -68,11 +100,42 @@ const RackView: React.FC = () => {
       startU: device.start_u
     });
     fetchMoveResources();
+    setError(null);
     setIsMoveModalOpen(true);
+  };
+
+  const openEditModal = (device: Device) => {
+    setSelectedDevice(device);
+    setEditDeviceData({
+      name: device.name,
+      description: device.description || '',
+      device_type: device.device_type,
+      vendor_model: device.vendor_model,
+      start_u: device.start_u,
+      u_height: device.u_height,
+      ip_addresses: device.ip_addresses,
+      management_ip: device.management_ip || '',
+      management_link: device.management_link || '',
+      owner: (device as any).owner || '',
+      network_ports: (device as any).network_ports || ''
+    });
+    setError(null);
+    setIsEditModalOpen(true);
+  };
+
+  const openHistoryModal = (device: Device) => {
+    setSelectedDevice(device);
+    setHistoryData([]);
+    setError(null);
+    setIsHistoryModalOpen(true);
+    getDeviceHistory(device.id)
+      .then(setHistoryData)
+      .catch(() => setError("Failed to load status history."));
   };
 
   const handleMove = (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     if (selectedDevice) {
       updateDevice(selectedDevice.id, { 
         rack_id: moveData.rackId, 
@@ -80,12 +143,28 @@ const RackView: React.FC = () => {
       }).then(() => {
         setIsMoveModalOpen(false);
         fetchRack();
+      }).catch(err => {
+        setError(err.response?.data?.detail || "Failed to move device.");
+      });
+    }
+  };
+
+  const handleUpdate = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (selectedDevice) {
+      updateDevice(selectedDevice.id, editDeviceData).then(() => {
+        setIsEditModalOpen(false);
+        fetchRack();
+      }).catch(err => {
+        setError(err.response?.data?.detail || "Failed to update device.");
       });
     }
   };
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     if (id) {
       createDevice({ ...newDevice, rack_id: parseInt(id) }).then(() => {
         setIsModalOpen(false);
@@ -98,9 +177,13 @@ const RackView: React.FC = () => {
           u_height: 1,
           ip_addresses: '',
           management_ip: '',
-          management_link: ''
+          management_link: '',
+          owner: '',
+          network_ports: ''
         });
         fetchRack();
+      }).catch(err => {
+        setError(err.response?.data?.detail || "Failed to create device.");
       });
     }
   };
@@ -157,6 +240,8 @@ const RackView: React.FC = () => {
                     if (!device) {
                       setNewDevice({ ...newDevice, start_u: u });
                       setIsModalOpen(true);
+                    } else if (isStart) {
+                      openEditModal(device);
                     }
                   }}
                 >
@@ -164,10 +249,17 @@ const RackView: React.FC = () => {
                   {device ? (
                     <div className="flex justify-between items-center w-full">
                       <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${
-                          device.status === 'Online' ? 'bg-green-500 shadow-[0_0_5px_green]' : 
-                          device.status === 'Offline' ? 'bg-red-500' : 'bg-slate-500'
-                        }`} />
+                        <div 
+                          className={`w-2 h-2 rounded-full cursor-help ${
+                            device.status === 'Online' ? 'bg-green-500 shadow-[0_0_5px_green]' : 
+                            device.status === 'Offline' ? 'bg-red-500' : 'bg-slate-500'
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openHistoryModal(device);
+                          }}
+                          title="Click to view 24h history"
+                        />
                         <span>{device.name}</span>
                       </div>
                       <span className="text-[10px] opacity-60">{device.device_type}</span>
@@ -195,13 +287,31 @@ const RackView: React.FC = () => {
                     <p className="text-sm text-slate-500">{device.vendor_model} ({device.device_type})</p>
                   </div>
                   <div className="flex flex-col items-end gap-2">
-                    <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${
-                      device.status === 'Online' ? 'bg-green-100 text-green-700' : 
-                      device.status === 'Offline' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700'
-                    }`}>
+                    <button 
+                      onClick={() => openHistoryModal(device)}
+                      className={`px-2 py-1 rounded text-[10px] font-bold uppercase transition-transform hover:scale-105 ${
+                        device.status === 'Online' ? 'bg-green-100 text-green-700' : 
+                        device.status === 'Offline' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700'
+                      }`}
+                      title="View uptime history"
+                    >
                       {device.status}
-                    </div>
+                    </button>
                     <div className="flex gap-2">
+                      <button 
+                        onClick={() => openHistoryModal(device)}
+                        className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                        title="Uptime History"
+                      >
+                        <Clock size={16} />
+                      </button>
+                      <button 
+                        onClick={() => openEditModal(device)}
+                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                        title="Edit Device"
+                      >
+                        <Edit2 size={16} />
+                      </button>
                       <button 
                         onClick={() => openMoveModal(device)}
                         className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
@@ -256,8 +366,9 @@ const RackView: React.FC = () => {
         </div>
       </div>
 
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Add New Device">
-        <form onSubmit={handleCreate} className="space-y-4">
+      <Modal isOpen={isModalOpen} onClose={clearModals} title="Add New Device">
+        <form onSubmit={handleCreate} className="space-y-4 max-h-[80vh] overflow-y-auto px-1">
+          {error && <div className="bg-red-50 text-red-600 p-2 rounded text-xs border border-red-200 mb-2">{error}</div>}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Device Name</label>
@@ -279,8 +390,22 @@ const RackView: React.FC = () => {
               <input required className="w-full border rounded px-3 py-2" value={newDevice.vendor_model} onChange={e => setNewDevice({...newDevice, vendor_model: e.target.value})} />
             </div>
             <div>
+              <label className="block text-sm font-medium mb-1">Owner</label>
+              <input className="w-full border rounded px-3 py-2" value={newDevice.owner} onChange={e => setNewDevice({...newDevice, owner: e.target.value})} placeholder="e.g. Infrastructure Team" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Description</label>
+            <textarea className="w-full border rounded px-3 py-2" rows={2} value={newDevice.description} onChange={e => setNewDevice({...newDevice, description: e.target.value})} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
               <label className="block text-sm font-medium mb-1">IP Addresses</label>
               <input required className="w-full border rounded px-3 py-2" value={newDevice.ip_addresses} onChange={e => setNewDevice({...newDevice, ip_addresses: e.target.value})} placeholder="1.2.3.4, 5.6.7.8" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Ports</label>
+              <input className="w-full border rounded px-3 py-2" value={newDevice.network_ports} onChange={e => setNewDevice({...newDevice, network_ports: e.target.value})} placeholder="e.g. 48x1G, 4x10G" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -309,8 +434,77 @@ const RackView: React.FC = () => {
         </form>
       </Modal>
 
-      <Modal isOpen={isMoveModalOpen} onClose={() => setIsMoveModalOpen(false)} title="Move Device">
+      <Modal isOpen={isEditModalOpen} onClose={clearModals} title="Edit Device Details">
+        <form onSubmit={handleUpdate} className="space-y-4 max-h-[80vh] overflow-y-auto px-1">
+          {error && <div className="bg-red-50 text-red-600 p-2 rounded text-xs border border-red-200 mb-2">{error}</div>}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Device Name</label>
+              <input required className="w-full border rounded px-3 py-2" value={editDeviceData.name} onChange={e => setEditDeviceData({...editDeviceData, name: e.target.value})} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Type</label>
+              <select className="w-full border rounded px-3 py-2" value={editDeviceData.device_type} onChange={e => setEditDeviceData({...editDeviceData, device_type: e.target.value})}>
+                <option>Server</option>
+                <option>TOR Switch</option>
+                <option>Load Balancer</option>
+                <option>Patch Panel</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Vendor/Model</label>
+              <input required className="w-full border rounded px-3 py-2" value={editDeviceData.vendor_model} onChange={e => setEditDeviceData({...editDeviceData, vendor_model: e.target.value})} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Owner</label>
+              <input className="w-full border rounded px-3 py-2" value={editDeviceData.owner} onChange={e => setEditDeviceData({...editDeviceData, owner: e.target.value})} placeholder="e.g. Infrastructure Team" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Description</label>
+            <textarea className="w-full border rounded px-3 py-2" rows={2} value={editDeviceData.description} onChange={e => setEditDeviceData({...editDeviceData, description: e.target.value})} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">IP Addresses</label>
+              <input required className="w-full border rounded px-3 py-2" value={editDeviceData.ip_addresses} onChange={e => setEditDeviceData({...editDeviceData, ip_addresses: e.target.value})} placeholder="1.2.3.4, 5.6.7.8" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Ports</label>
+              <input className="w-full border rounded px-3 py-2" value={editDeviceData.network_ports} onChange={e => setEditDeviceData({...editDeviceData, network_ports: e.target.value})} placeholder="e.g. 48x1G, 4x10G" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Start U</label>
+              <input type="number" required className="w-full border rounded px-3 py-2" value={editDeviceData.start_u} onChange={e => setEditDeviceData({...editDeviceData, start_u: parseInt(e.target.value)})} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Height (U)</label>
+              <input type="number" required className="w-full border rounded px-3 py-2" value={editDeviceData.u_height} onChange={e => setEditDeviceData({...editDeviceData, u_height: parseInt(e.target.value)})} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Mgmt IP</label>
+              <input className="w-full border rounded px-3 py-2" value={editDeviceData.management_ip} onChange={e => setEditDeviceData({...editDeviceData, management_ip: e.target.value})} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Mgmt Link</label>
+              <input className="w-full border rounded px-3 py-2" value={editDeviceData.management_link} onChange={e => setEditDeviceData({...editDeviceData, management_link: e.target.value})} placeholder="https://..." />
+            </div>
+          </div>
+          <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">
+            Save Changes
+          </button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={isMoveModalOpen} onClose={clearModals} title="Move Device">
         <form onSubmit={handleMove} className="space-y-4">
+          {error && <div className="bg-red-50 text-red-600 p-2 rounded text-xs border border-red-200 mb-2">{error}</div>}
           <p className="text-sm text-slate-600 mb-4">
             Relocate <strong>{selectedDevice?.name}</strong> to a different rack or U position.
           </p>
@@ -367,6 +561,48 @@ const RackView: React.FC = () => {
             Confirm Move
           </button>
         </form>
+      </Modal>
+
+      <Modal isOpen={isHistoryModalOpen} onClose={clearModals} title={`Status History: ${selectedDevice?.name}`}>
+        <div className="max-h-[60vh] overflow-y-auto px-2">
+          {error && <div className="bg-red-50 text-red-600 p-2 rounded text-xs border border-red-200 mb-4">{error}</div>}
+          
+          <div className="space-y-4">
+            {historyData.length === 0 && !error && (
+              <div className="text-center py-10 text-slate-500 italic text-sm">
+                No history recorded yet. Background monitoring will collect data every check cycle.
+              </div>
+            )}
+            
+            {historyData.slice().reverse().map((entry, idx) => (
+              <div key={entry.id} className="relative pl-6 border-l-2 border-slate-100 pb-4 last:pb-0">
+                <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-2 border-white ${
+                  entry.status === 'Online' ? 'bg-green-500' : 'bg-red-500'
+                }`} />
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className={`text-xs font-bold ${
+                      entry.status === 'Online' ? 'text-green-700' : 'text-red-700'
+                    }`}>
+                      {entry.status}
+                    </span>
+                    <p className="text-[10px] text-slate-500">
+                      {new Date(entry.timestamp).toLocaleString()}
+                    </p>
+                  </div>
+                  {idx < historyData.length - 1 && (
+                    <span className="text-[9px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-400">
+                      Step {idx + 1}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="mt-6 pt-4 border-t text-[10px] text-slate-400 italic">
+          Showing data for the last 24 hours. Older records are automatically pruned.
+        </div>
       </Modal>
     </div>
   );

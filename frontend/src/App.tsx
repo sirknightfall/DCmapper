@@ -1,8 +1,9 @@
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import { Layout } from 'lucide-react';
+import { Layout, Settings } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import GridView from './components/GridView';
 import RackView from './components/RackView';
+import Config from './components/Config';
 
 function App() {
   return (
@@ -14,8 +15,12 @@ function App() {
               <Layout size={24} />
               <span>DCmapper</span>
             </Link>
-            <nav>
+            <nav className="flex items-center gap-6">
               <Link to="/" className="hover:text-blue-400 transition-colors">Locations</Link>
+              <Link to="/config" className="hover:text-blue-400 transition-colors flex items-center gap-1">
+                <Settings size={18} />
+                <span>Settings</span>
+              </Link>
             </nav>
           </div>
         </header>
@@ -25,6 +30,7 @@ function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/datacenter/:id" element={<GridView />} />
             <Route path="/rack/:id" element={<RackView />} />
+            <Route path="/config" element={<Config />} />
           </Routes>
         </main>
 
