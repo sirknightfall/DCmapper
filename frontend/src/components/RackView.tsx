@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getRack, createDevice } from '../api';
-import type { RackWithDevices } from '../types';
-import { ChevronLeft, Plus, ExternalLink, Activity } from 'lucide-react';
+import { getRack, createDevice, updateDevice, deleteDevice, getDatacenters, getRacks } from '../api';
+import type { RackWithDevices, Device, Datacenter, Rack } from '../types';
+import { ChevronLeft, Plus, ExternalLink, Activity, Trash2, Move } from 'lucide-react';
 import Modal from './Modal';
 
 const RackView: React.FC = () => {
@@ -10,6 +10,15 @@ const RackView: React.FC = () => {
   const [rack, setRack] = useState<RackWithDevices | null>(null);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [allDCs, setAllDCs] = useState<Datacenter[]>([]);
+  const [allRacks, setAllRacks] = useState<Rack[]>([]);
+  const [moveData, setMoveData] = useState({
+    dcId: 0,
+    rackId: 0,
+    startU: 1
+  });
   
   const [newDevice, setNewDevice] = useState({
     name: '',
@@ -32,9 +41,48 @@ const RackView: React.FC = () => {
     }
   };
 
+  const fetchMoveResources = () => {
+    Promise.all([getDatacenters(), getRacks()]).then(([dcs, racks]) => {
+      setAllDCs(dcs);
+      setAllRacks(racks);
+    });
+  };
+
   useEffect(() => {
     fetchRack();
   }, [id]);
+
+  const handleDelete = (deviceId: number) => {
+    if (window.confirm('Are you sure you want to delete this device?')) {
+      deleteDevice(deviceId).then(() => {
+        fetchRack();
+      });
+    }
+  };
+
+  const openMoveModal = (device: Device) => {
+    setSelectedDevice(device);
+    setMoveData({
+      dcId: rack?.datacenter_id || 0,
+      rackId: device.rack_id,
+      startU: device.start_u
+    });
+    fetchMoveResources();
+    setIsMoveModalOpen(true);
+  };
+
+  const handleMove = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedDevice) {
+      updateDevice(selectedDevice.id, { 
+        rack_id: moveData.rackId, 
+        start_u: moveData.startU 
+      }).then(() => {
+        setIsMoveModalOpen(false);
+        fetchRack();
+      });
+    }
+  };
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,11 +194,29 @@ const RackView: React.FC = () => {
                     <h3 className="font-bold text-lg">{device.name}</h3>
                     <p className="text-sm text-slate-500">{device.vendor_model} ({device.device_type})</p>
                   </div>
-                  <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${
-                    device.status === 'Online' ? 'bg-green-100 text-green-700' : 
-                    device.status === 'Offline' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700'
-                  }`}>
-                    {device.status}
+                  <div className="flex flex-col items-end gap-2">
+                    <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${
+                      device.status === 'Online' ? 'bg-green-100 text-green-700' : 
+                      device.status === 'Offline' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700'
+                    }`}>
+                      {device.status}
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => openMoveModal(device)}
+                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                        title="Move Device"
+                      >
+                        <Move size={16} />
+                      </button>
+                      <button 
+                        onClick={() => handleDelete(device.id)}
+                        className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="Delete Device"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
                 </div>
                 
@@ -239,6 +305,66 @@ const RackView: React.FC = () => {
           </div>
           <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">
             Add Device
+          </button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={isMoveModalOpen} onClose={() => setIsMoveModalOpen(false)} title="Move Device">
+        <form onSubmit={handleMove} className="space-y-4">
+          <p className="text-sm text-slate-600 mb-4">
+            Relocate <strong>{selectedDevice?.name}</strong> to a different rack or U position.
+          </p>
+          
+          <div>
+            <label className="block text-sm font-medium mb-1">Target Datacenter</label>
+            <select 
+              className="w-full border rounded px-3 py-2" 
+              value={moveData.dcId} 
+              onChange={e => {
+                const newDcId = parseInt(e.target.value);
+                const firstRackInDc = allRacks.find(r => r.datacenter_id === newDcId);
+                setMoveData({
+                  ...moveData, 
+                  dcId: newDcId,
+                  rackId: firstRackInDc ? firstRackInDc.id : 0
+                });
+              }}
+            >
+              {allDCs.map(dc => (
+                <option key={dc.id} value={dc.id}>{dc.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Target Rack</label>
+            <select 
+              className="w-full border rounded px-3 py-2" 
+              value={moveData.rackId} 
+              onChange={e => setMoveData({...moveData, rackId: parseInt(e.target.value)})}
+            >
+              {allRacks.filter(r => r.datacenter_id === moveData.dcId).map(r => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Start U Position</label>
+            <input 
+              type="number" 
+              required 
+              className="w-full border rounded px-3 py-2" 
+              value={moveData.startU} 
+              onChange={e => setMoveData({...moveData, startU: parseInt(e.target.value)})} 
+            />
+            <p className="text-[10px] text-slate-400 mt-1">
+              Device height: {selectedDevice?.u_height}U
+            </p>
+          </div>
+
+          <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">
+            Confirm Move
           </button>
         </form>
       </Modal>

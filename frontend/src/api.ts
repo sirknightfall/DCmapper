@@ -17,6 +17,9 @@ const api = axios.create({
 export const getDatacenters = () => api.get<Datacenter[]>('/datacenters/').then((res: any) => res.data);
 export const getDatacenter = (id: number) => api.get<DatacenterWithRacks>(`/datacenters/${id}`).then((res: any) => res.data);
 export const getRack = (id: number) => api.get<RackWithDevices>(`/racks/${id}`).then((res: any) => res.data);
+export const getRacks = () => api.get<Rack[]>('/racks/').then((res: any) => res.data);
 export const createDatacenter = (dc: Omit<Datacenter, 'id'>) => api.post<Datacenter>('/datacenters/', dc).then((res: any) => res.data);
 export const createRack = (rack: Omit<Rack, 'id'>) => api.post<Rack>('/racks/', rack).then((res: any) => res.data);
 export const createDevice = (device: any) => api.post<Device>('/devices/', device).then((res: any) => res.data);
+export const updateDevice = (id: number, device: Partial<Device>) => api.patch<Device>(`/devices/${id}`, device).then((res: any) => res.data);
+export const deleteDevice = (id: number) => api.delete(`/devices/${id}`).then((res: any) => res.data);

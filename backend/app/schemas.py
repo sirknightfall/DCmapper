@@ -52,6 +52,22 @@ class DeviceRead(DeviceBase):
     status: str
     last_checked: Optional[datetime] = None
 
+class DeviceUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    device_type: Optional[str] = None
+    vendor_model: Optional[str] = None
+    rack_id: Optional[int] = None
+    start_u: Optional[int] = None
+    u_height: Optional[int] = None
+    ip_addresses: Optional[str] = None
+    management_ip: Optional[str] = None
+    management_link: Optional[str] = None
+    network_ports: Optional[str] = None
+    owner: Optional[str] = None
+    installation_date: Optional[datetime] = None
+    status: Optional[str] = None
+
 # Nested relations for drill-down views
 class RackWithDevices(RackRead):
     devices: List[DeviceRead] = []

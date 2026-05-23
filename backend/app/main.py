@@ -8,7 +8,7 @@ from app.models import Datacenter, Rack, Device
 from app.schemas import (
     DatacenterCreate, DatacenterRead, DatacenterWithRacks,
     RackCreate, RackRead, RackWithDevices,
-    DeviceCreate, DeviceRead
+    DeviceCreate, DeviceRead, DeviceUpdate
 )
 from app.tasks import status_monitor_task
 
@@ -60,6 +60,11 @@ def create_rack(rack: RackCreate, session: Session = Depends(get_session)):
     session.refresh(db_rack)
     return db_rack
 
+@app.get("/racks/", response_model=List[RackRead])
+def read_racks(offset: int = 0, limit: int = Query(default=100, le=100), session: Session = Depends(get_session)):
+    racks = session.exec(select(Rack).offset(offset).limit(limit)).all()
+    return racks
+
 @app.get("/racks/{rack_id}", response_model=RackWithDevices)
 def read_rack(rack_id: int, session: Session = Depends(get_session)):
     rack = session.get(Rack, rack_id)
@@ -85,7 +90,7 @@ def read_device(device_id: int, session: Session = Depends(get_session)):
     return device
 
 @app.patch("/devices/{device_id}", response_model=DeviceRead)
-def update_device(device_id: int, device_update: DeviceCreate, session: Session = Depends(get_session)):
+def update_device(device_id: int, device_update: DeviceUpdate, session: Session = Depends(get_session)):
     db_device = session.get(Device, device_id)
     if not db_device:
         raise HTTPException(status_code=404, detail="Device not found")
