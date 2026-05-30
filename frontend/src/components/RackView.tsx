@@ -12,6 +12,29 @@ const RackView: React.FC = () => {
   const [rack, setRack] = useState<RackWithDevices | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const matchesSearch = (device: Device) => {
+    if (!searchTerm) return false;
+    const term = searchTerm.toLowerCase();
+    
+    if (device.name && device.name.toLowerCase().includes(term)) return true;
+    if (device.device_type && device.device_type.toLowerCase().includes(term)) return true;
+    if (device.description && device.description.toLowerCase().includes(term)) return true;
+    if (device.vendor_model && device.vendor_model.toLowerCase().includes(term)) return true;
+    if (device.ip_addresses && device.ip_addresses.toLowerCase().includes(term)) return true;
+    if (device.management_ip && device.management_ip.toLowerCase().includes(term)) return true;
+    if (device.management_link && device.management_link.toLowerCase().includes(term)) return true;
+    if ((device as any).network_ports && (device as any).network_ports.toLowerCase().includes(term)) return true;
+    if ((device as any).owner && (device as any).owner.toLowerCase().includes(term)) return true;
+    
+    if (device.custom_values && typeof device.custom_values === 'object') {
+      return Object.values(device.custom_values).some(val => 
+        String(val).toLowerCase().includes(term)
+      );
+    }
+    return false;
+  };
   
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -421,12 +444,15 @@ const RackView: React.FC = () => {
               
               if (device && !isStart) return null;
 
+              const isMatched = device && searchTerm && matchesSearch(device);
+
               return (
                 <div 
                   key={u}
-                  className={`relative flex items-center px-3 border border-slate-800 rounded text-xs font-mono transition-colors
-                    ${device ? 'bg-blue-900 text-blue-100 cursor-pointer hover:bg-blue-800' : 
-                      isAdmin ? 'bg-slate-800 text-slate-500 cursor-pointer hover:bg-slate-700' : 'bg-slate-800 text-slate-600 cursor-default'}
+                  className={`relative flex items-center px-3 border rounded text-xs font-mono transition-all
+                    ${isMatched ? 'border-blue-400 bg-blue-950 text-blue-100 shadow-[0_0_15px_rgba(59,130,246,0.9)] animate-pulse cursor-pointer hover:bg-blue-900/80' : 
+                      device ? 'border-slate-800 bg-blue-900 text-blue-100 cursor-pointer hover:bg-blue-800' : 
+                      isAdmin ? 'border-slate-800 bg-slate-800 text-slate-500 cursor-pointer hover:bg-slate-700' : 'border-slate-800 bg-slate-800 text-slate-600 cursor-default'}
                   `}
                   style={{ height: device ? `${device.u_height * 2.5}rem` : '2rem' }}
                   onClick={() => {
@@ -477,74 +503,108 @@ const RackView: React.FC = () => {
             <Activity size={20} />
             Device Inventory
           </h2>
+
+          {/* Search Bar */}
+          <div className="mb-4 relative">
+            <input
+              type="text"
+              placeholder="Search devices by name, type, IP, or custom attributes..."
+              className="w-full bg-white border border-slate-200 rounded-lg px-4 py-2 pl-10 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-shadow duration-200"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            <div className="absolute left-3 top-2.5 text-slate-400">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+            {searchTerm && (
+              <button 
+                onClick={() => setSearchTerm('')} 
+                type="button"
+                className="absolute right-3 top-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
           <div className="space-y-4">
-            {rack.devices.sort((a,b) => b.start_u - a.start_u).map(device => (
-              <div key={device.id} className="bg-white border rounded-lg p-4 shadow-sm">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h3 className="font-bold text-lg">{device.name}</h3>
-                    <p className="text-sm text-slate-500">{device.vendor_model} ({device.device_type})</p>
-                  </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <button 
-                      onClick={() => openHistoryModal(device)}
-                      className={`px-2 py-1 rounded text-[10px] font-bold uppercase transition-transform hover:scale-105 ${
-                        device.status === 'Online' ? 'bg-green-100 text-green-700' : 
-                        device.status === 'Offline' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700'
-                      }`}
-                      title="View uptime history"
-                    >
-                      {device.status}
-                    </button>
-                    <div className="flex gap-2">
+            {rack.devices
+              .filter(device => !searchTerm || matchesSearch(device))
+              .sort((a,b) => b.start_u - a.start_u)
+              .map(device => (
+                <div key={device.id} className="bg-white border rounded-lg p-4 shadow-sm">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h3 className="font-bold text-lg">{device.name}</h3>
+                      <p className="text-sm text-slate-500">{device.vendor_model} ({device.device_type})</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
                       <button 
                         onClick={() => openHistoryModal(device)}
-                        className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
-                        title="Uptime History"
+                        className={`px-2 py-1 rounded text-[10px] font-bold uppercase transition-transform hover:scale-105 ${
+                          device.status === 'Online' ? 'bg-green-100 text-green-700' : 
+                          device.status === 'Offline' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700'
+                        }`}
+                        title="View uptime history"
                       >
-                        <Clock size={16} />
+                        {device.status}
                       </button>
-                      {isAdmin && (
-                        <>
-                          <button 
-                            onClick={() => openEditModal(device)}
-                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                            title="Edit Device"
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button 
-                            onClick={() => openMoveModal(device)}
-                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                            title="Move Device"
-                          >
-                            <Move size={16} />
-                          </button>
-                          <button 
-                            onClick={() => handleDelete(device.id)}
-                            className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                            title="Delete Device"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </>
-                      )}
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => openHistoryModal(device)}
+                          className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                          title="Uptime History"
+                        >
+                          <Clock size={16} />
+                        </button>
+                        {isAdmin && (
+                          <>
+                            <button 
+                              onClick={() => openEditModal(device)}
+                              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                              title="Edit Device"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button 
+                              onClick={() => openMoveModal(device)}
+                              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                              title="Move Device"
+                            >
+                              <Move size={16} />
+                            </button>
+                            <button 
+                              onClick={() => handleDelete(device.id)}
+                              className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                              title="Delete Device"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-                
-                {renderDeviceDetails(device)}
+                  
+                  {renderDeviceDetails(device)}
 
-                {device.last_checked && (
-                  <div className="mt-4 text-[10px] text-slate-400 italic">
-                    Last checked: {new Date(device.last_checked).toLocaleString()}
-                  </div>
-                )}
-              </div>
-            ))}
+                  {device.last_checked && (
+                    <div className="mt-4 text-[10px] text-slate-400 italic">
+                      Last checked: {new Date(device.last_checked).toLocaleString()}
+                    </div>
+                  )}
+                </div>
+              ))}
             {rack.devices.length === 0 && !loading && (
               <div className="py-10 text-center text-slate-500 bg-slate-50 border border-dashed rounded-lg">
                 No devices in this rack.
+              </div>
+            )}
+            {rack.devices.length > 0 && rack.devices.filter(device => !searchTerm || matchesSearch(device)).length === 0 && (
+              <div className="py-10 text-center text-slate-500 bg-slate-50 border border-dashed rounded-lg">
+                No devices match search term "{searchTerm}".
               </div>
             )}
           </div>

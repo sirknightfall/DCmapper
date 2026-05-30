@@ -10,6 +10,7 @@ const Dashboard: React.FC = () => {
   const { isAdmin } = useAuth();
   const [datacenters, setDatacenters] = useState<Datacenter[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +74,13 @@ const Dashboard: React.FC = () => {
 
   if (loading && datacenters.length === 0) return <div className="text-center py-10">Loading locations...</div>;
 
+  const filteredDCs = datacenters.filter(dc => {
+    const term = searchTerm.toLowerCase();
+    return dc.name.toLowerCase().includes(term) ||
+           dc.address.toLowerCase().includes(term) ||
+           (dc.description && dc.description.toLowerCase().includes(term));
+  });
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -97,8 +105,38 @@ const Dashboard: React.FC = () => {
         </div>
       )}
 
+      {/* Location Search Bar */}
+      <div className="mb-6 bg-slate-50 border rounded-lg p-4 flex flex-col md:flex-row gap-4 items-center justify-between shadow-sm">
+        <div className="flex items-center gap-2 w-full md:max-w-md relative">
+          <input
+            type="text"
+            placeholder="🔍 Search locations (Name, Address, Description...)"
+            className="w-full pl-4 pr-10 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-inner"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          {searchTerm && (
+            <button 
+              onClick={() => setSearchTerm('')} 
+              className="absolute right-3 text-xs text-slate-400 hover:text-slate-600 font-bold"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="text-xs text-slate-500">
+          {searchTerm ? (
+            <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-bold border border-blue-100 animate-pulse">
+              Found {filteredDCs.length} matching locations
+            </span>
+          ) : (
+            <span>Type above to search through your physical datacenter locations.</span>
+          )}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {datacenters.map(dc => (
+        {filteredDCs.map(dc => (
           <Link 
             key={dc.id} 
             to={`/datacenter/${dc.id}`}
@@ -133,9 +171,9 @@ const Dashboard: React.FC = () => {
             </div>
           </Link>
         ))}
-        {datacenters.length === 0 && !loading && (
+        {filteredDCs.length === 0 && !loading && (
           <div className="col-span-full py-20 text-center text-slate-500 bg-white border border-dashed rounded-lg">
-            No datacenters configured yet.
+            {searchTerm ? "No locations found matching your search query." : "No datacenters configured yet."}
           </div>
         )}
       </div>
