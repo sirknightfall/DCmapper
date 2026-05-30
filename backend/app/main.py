@@ -306,13 +306,22 @@ def export_datacenter_csv(dc_id: int, session: Session = Depends(get_session), _
     if not dc:
         raise HTTPException(status_code=404, detail="Datacenter not found")
     
+    # Get all active fields
+    active_fields = session.exec(select(DeviceField).where(DeviceField.is_active == True)).all()
+    
+    # Base headers that always exist
+    headers = ["Name", "Type", "Rack", "Start U", "Height", "Status", "Last Checked", "Deleted At"]
+    # Dynamic active headers
+    for f in active_fields:
+        headers.append(f.label)
+        
     # Get all racks in this DC
     racks = session.exec(select(Rack).where(Rack.datacenter_id == dc_id)).all()
     if not racks:
         # Return empty CSV with headers
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["Name", "Type", "Vendor/Model", "Rack", "Start U", "Height", "IP Addresses", "Status", "Deleted At"])
+        writer.writerow(headers)
         output.seek(0)
         return Response(content=output.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=dc_{dc.name}_export.csv"})
 
@@ -326,19 +335,33 @@ def export_datacenter_csv(dc_id: int, session: Session = Depends(get_session), _
     output = io.StringIO()
     writer = csv.writer(output)
     
-    # Headers
-    writer.writerow([
-        "Name", "Type", "Vendor/Model", "Rack", "Start U", "Height", 
-        "IP Addresses", "Mgmt IP", "Owner", "Status", "Last Checked", "Deleted At"
-    ])
+    writer.writerow(headers)
     
     for d in devices:
-        writer.writerow([
-            d.name, d.device_type, d.vendor_model, rack_map.get(d.rack_id, "Unknown"), 
-            d.start_u, d.u_height, d.ip_addresses, d.management_ip, d.owner,
-            d.status, d.last_checked.isoformat() if d.last_checked else "Never",
+        row = [
+            d.name, d.device_type, rack_map.get(d.rack_id, "Unknown"), 
+            d.start_u, d.u_height, d.status,
+            d.last_checked.isoformat() if d.last_checked else "Never",
             d.deleted_at.isoformat() if d.deleted_at else "Active"
-        ])
+        ]
+        # Append dynamic active fields values
+        for f in active_fields:
+            val = None
+            if not f.is_custom:
+                # Built-in field
+                val = getattr(d, f.name, None)
+            else:
+                # Custom field
+                if d.custom_values:
+                    val = d.custom_values.get(f.name, None)
+            
+            # Format datetime dynamically if it's installation_date or date type
+            if isinstance(val, datetime):
+                row.append(val.isoformat())
+            else:
+                row.append(str(val) if val is not None else "")
+            
+        writer.writerow(row)
     
     output.seek(0)
     return Response(
