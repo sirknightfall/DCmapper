@@ -30,14 +30,22 @@ graph TD
 
 ---
 
-## ✨ Core Features
+## ✨ Core Features & Enterprise Features
 
+### 🏛️ Core Platform
 1.  **Multi-Site Dashboard:** A bird's-eye view card list of all configured locations capturing physical addresses, contact records, and general description notes.
 2.  **Interactive Floor Grid:** A 2D coordinate system ($X \times Y$) for placing rack enclosures onto exact coordinates. Includes movement boundary checks and cabinet overlap validation.
 3.  **Rack "U" Elevation View:** Vertical schematic representing individual slots (up to 42U or custom heights). Shows accurate sizing, hardware models, and live status lights.
 4.  **Device Inventory:** Track hostname, device type (Server, Switch, PDU, Patch Panel), hardware vendor, IP addresses, installation dates, and out-of-band management endpoints (with external dashboard quick-links).
 5.  **Live Ping Monitor:** An automated background service that scans all devices with active IPs, issues concurrent ICMP pings, records histories, and notifies the UI in near real-time.
 6.  **Soft-Deletion & Archiving:** Pruned resources are placed into archives and kept for a configurable retention window before being permanently destroyed.
+
+### 🚀 Premium Advanced Features
+*   **Advanced Search & Recursive Attribute Filtering:** Scans built-in and dynamic custom fields. Renders search matches across multi-site cards, floor coordinates, and vertical rack slots in real-time with vibrant pulsing blue animation alerts.
+*   **Interactive Diagnostics Console:** A web-based CLI emulator that triggers non-blocking, multi-packet live ICMP ping checks on remote hosts, streams real-time console outputs, and dynamically updates system statuses.
+*   **Dynamic & Authenticated CSV Export:** Enables on-the-fly CSV exports, seamlessly integrating custom-defined schema fields into the generated sheet. Downloads are securely processed using JWT tokens.
+*   **Bulk Datacenter Import Wizard:** A wizard UI allowing transaction-backed bulk CSV/JSON imports of full racks and nested devices with syntax validation, grid boundary collision detection, and instant status previews.
+*   **User Activity Audit Logging:** A relational, system-wide transaction logging system recording every CRUD operation, configuration adjustment, password update, and import action into an immutable audit trail, complete with a beautiful visual timeline under the configuration page.
 
 ---
 
@@ -87,7 +95,9 @@ All requests to the backend APIs require token-based authentication using an **O
 | | `GET` | `/datacenters/{dc_id}` | Viewer / Admin | Retrieve site layout & nested racks |
 | | `PATCH` | `/datacenters/{dc_id}` | Admin | Update site detail / resize floor layout |
 | | `DELETE` | `/datacenters/{dc_id}` | Admin | Cascade delete a datacenter and contents |
-| | `GET` | `/datacenters/{dc_id}/export` | Viewer / Admin | Export all devices in site to CSV |
+| | `GET` | `/datacenters/{dc_id}/export` | Viewer / Admin | Export all devices in site to CSV (includes dynamic fields) |
+| | `POST` | `/datacenters/{dc_id}/import/analyze` | Admin | Dry-run validation of a bulk CSV/JSON import file |
+| | `POST` | `/datacenters/{dc_id}/import/commit` | Admin | Commit and apply a transaction-backed bulk import |
 | **Racks** | `GET` | `/racks/` | Viewer / Admin | List all rack enclosures |
 | | `POST` | `/racks/` | Admin | Place a new rack onto coordinate grid |
 | | `GET` | `/racks/{rack_id}` | Viewer / Admin | Retrieve rack slot elevation (active devices) |
@@ -96,6 +106,7 @@ All requests to the backend APIs require token-based authentication using an **O
 | **Devices** | `POST` | `/devices/` | Admin | Mount a device into a rack U-slot |
 | | `GET` | `/devices/{device_id}` | Viewer / Admin | Retrieve device details |
 | | `PATCH` | `/devices/{device_id}` | Admin | Update specs or change U-slot mounting |
+| | `GET` | `/devices/{device_id}/ping` | Viewer / Admin | Trigger live non-blocking interactive ping check |
 | | `GET` | `/devices/{device_id}/history` | Viewer / Admin | Get health monitoring logs for device |
 | | `DELETE` | `/devices/{device_id}` | Admin | Soft-delete equipment (sent to archives) |
 | **Config** | `GET` | `/config/` | Viewer / Admin | Get background loop interval / retention |
@@ -104,6 +115,7 @@ All requests to the backend APIs require token-based authentication using an **O
 | | `POST` | `/device-fields/` | Admin | Create a completely new custom field |
 | | `PATCH` | `/device-fields/{field_id}` | Admin | Update field label, type, required status, or toggle active/inactive |
 | | `DELETE` | `/device-fields/{field_id}` | Admin | Delete custom field (or deactivate built-in field) |
+| **Audit Logs** | `GET` | `/activity-logs/` | Viewer / Admin | Fetch full activity audit trail of last 500 system operations |
 
 ---
 
