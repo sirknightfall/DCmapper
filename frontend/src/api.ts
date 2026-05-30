@@ -51,7 +51,20 @@ export const getDatacenter = (id: number) => api.get<DatacenterWithRacks>(`/data
 export const createDatacenter = (dc: Omit<Datacenter, 'id'>) => api.post<Datacenter>('/datacenters/', dc).then((res: any) => res.data);
 export const updateDatacenter = (id: number, dc: Partial<Datacenter>) => api.patch<Datacenter>(`/datacenters/${id}`, dc).then((res: any) => res.data);
 export const deleteDatacenter = (id: number) => api.delete(`/datacenters/${id}`).then((res: any) => res.data);
-export const getDatacenterExportUrl = (dcId: number) => `${API_URL}/datacenters/${dcId}/export`;
+export const downloadDatacenterExport = (dcId: number, dcName: string) => {
+  return api.get(`/datacenters/${dcId}/export`, { responseType: 'blob' })
+    .then((res: any) => {
+      const blob = new Blob([res.data], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `dc_${dcName.replace(/\s+/g, '_')}_export.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    });
+};
 
 // Racks
 export const getRack = (id: number) => api.get<RackWithDevices>(`/racks/${id}`).then((res: any) => res.data);

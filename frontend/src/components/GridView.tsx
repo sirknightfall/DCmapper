@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getDatacenter, createRack, updateRack, deleteRack, updateDatacenter, deleteDatacenter, getDatacenterExportUrl } from '../api';
+import { getDatacenter, createRack, updateRack, deleteRack, updateDatacenter, deleteDatacenter, downloadDatacenterExport } from '../api';
 import type { DatacenterWithRacks, Rack } from '../types';
 import { ChevronLeft, Plus, Download, Settings, Trash2 } from 'lucide-react';
 import Modal from './Modal';
@@ -203,14 +203,13 @@ const GridView: React.FC = () => {
           <p className="text-slate-600">{dc.address}</p>
         </div>
         <div className="flex gap-2">
-          <a 
-            href={getDatacenterExportUrl(dc.id)}
-            download
+          <button 
+            onClick={() => downloadDatacenterExport(dc.id, dc.name)}
             className="flex items-center gap-1 bg-slate-100 text-slate-700 px-4 py-2 rounded shadow-sm hover:bg-slate-200 transition-colors"
           >
             <Download size={18} />
             <span>Export CSV</span>
-          </a>
+          </button>
           {isAdmin && (
             <>
               <button 
