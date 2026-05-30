@@ -12,6 +12,7 @@ const GridView: React.FC = () => {
   const { isAdmin } = useAuth();
   const [dc, setDc] = useState<DatacenterWithRacks | null>(null);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
   
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -150,6 +151,37 @@ const GridView: React.FC = () => {
     }
   };
 
+  const matchesSearch = (rack: any) => {
+    if (!searchTerm) return false;
+    const term = searchTerm.toLowerCase();
+    
+    // Match rack name
+    if (rack.name.toLowerCase().includes(term)) return true;
+    
+    // Match any device attribute
+    if (rack.devices && Array.isArray(rack.devices)) {
+      return rack.devices.some((device: any) => {
+        if (device.name && device.name.toLowerCase().includes(term)) return true;
+        if (device.device_type && device.device_type.toLowerCase().includes(term)) return true;
+        if (device.description && device.description.toLowerCase().includes(term)) return true;
+        if (device.vendor_model && device.vendor_model.toLowerCase().includes(term)) return true;
+        if (device.ip_addresses && device.ip_addresses.toLowerCase().includes(term)) return true;
+        if (device.management_ip && device.management_ip.toLowerCase().includes(term)) return true;
+        if (device.management_link && device.management_link.toLowerCase().includes(term)) return true;
+        if (device.network_ports && device.network_ports.toLowerCase().includes(term)) return true;
+        if (device.owner && device.owner.toLowerCase().includes(term)) return true;
+        if (device.custom_values && typeof device.custom_values === 'object') {
+          return Object.values(device.custom_values).some(val => 
+            String(val).toLowerCase().includes(term)
+          );
+        }
+        return false;
+      });
+    }
+    
+    return false;
+  };
+
   if (loading && !dc) return <div className="text-center py-10">Loading floor plan...</div>;
   if (!dc) return <div className="text-center py-10">Datacenter not found.</div>;
 
@@ -206,6 +238,36 @@ const GridView: React.FC = () => {
         </div>
       </div>
 
+      {/* Dynamic Search & Highlights Bar */}
+      <div className="mb-6 bg-slate-50 border rounded-lg p-4 flex flex-col md:flex-row gap-4 items-center justify-between shadow-sm">
+        <div className="flex items-center gap-2 w-full md:max-w-md relative">
+          <input
+            type="text"
+            placeholder="🔍 Search devices (Name, IP, Owner, Type, Serial...)"
+            className="w-full pl-4 pr-10 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-inner"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          {searchTerm && (
+            <button 
+              onClick={() => setSearchTerm('')} 
+              className="absolute right-3 text-xs text-slate-400 hover:text-slate-600 font-bold"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="text-xs text-slate-500 flex items-center gap-2">
+          {searchTerm ? (
+            <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-bold border border-blue-100 animate-pulse">
+              Found {dc.racks.filter(matchesSearch).length} matching racks
+            </span>
+          ) : (
+            <span>Type above to highlight coordinates of matching rack hardware in real-time.</span>
+          )}
+        </div>
+      </div>
+
       {error && !isModalOpen && !isEditModalOpen && !isDcModalOpen && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
           {error}
@@ -223,10 +285,17 @@ const GridView: React.FC = () => {
           {Array.from({ length: maxY }).map((_, y) => (
             Array.from({ length: maxX }).map((_, x) => {
               const rack = dc.racks.find(r => r.x_coord === x && r.y_coord === y);
+              const isMatch = rack ? matchesSearch(rack) : false;
               return (
                 <div 
                   key={`${x}-${y}`}
-                  className={`group w-[60px] h-[60px] border rounded flex items-center justify-center relative transition-colors ${rack ? 'bg-slate-800 text-white' : 'bg-slate-50 border-slate-200'}`}
+                  className={`group w-[60px] h-[60px] border rounded flex items-center justify-center relative transition-all ${
+                    rack 
+                      ? isMatch 
+                        ? 'bg-blue-600 text-white ring-4 ring-blue-400 ring-opacity-70 shadow-[0_0_20px_rgba(59,130,246,0.8)] animate-pulse scale-105 z-10' 
+                        : 'bg-slate-800 text-white' 
+                      : 'bg-slate-50 border-slate-200'
+                  }`}
                 >
                   {rack ? (
                     <>

@@ -123,6 +123,9 @@ class RackWithDevices(RackRead):
 class DatacenterWithRacks(DatacenterRead):
     racks: List[RackRead] = []
 
+class DatacenterWithRacksAndDevices(DatacenterRead):
+    racks: List[RackWithDevices] = []
+
 # Auth Schemas
 class UserRead(BaseModel):
     id: int

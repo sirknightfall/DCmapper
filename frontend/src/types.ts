@@ -48,7 +48,7 @@ export interface DeviceField {
 
 
 export interface DatacenterWithRacks extends Datacenter {
-  racks: Rack[];
+  racks: RackWithDevices[];
 }
 
 export interface RackWithDevices extends Rack {

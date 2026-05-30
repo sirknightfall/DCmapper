@@ -11,7 +11,7 @@ from sqlmodel import Session, select, text
 from app.database import create_db_and_tables, get_session, engine
 from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory, User, DeviceField
 from app.schemas import (
-    DatacenterCreate, DatacenterRead, DatacenterWithRacks, DatacenterUpdate,
+    DatacenterCreate, DatacenterRead, DatacenterWithRacks, DatacenterWithRacksAndDevices, DatacenterUpdate,
     RackCreate, RackRead, RackWithDevices, RackUpdate,
     DeviceCreate, DeviceRead, DeviceUpdate,
     SystemConfigRead, SystemConfigUpdate,
@@ -245,11 +245,14 @@ def read_datacenters(offset: int = 0, limit: int = Query(default=100, le=100), s
     datacenters = session.exec(select(Datacenter).offset(offset).limit(limit)).all()
     return datacenters
 
-@app.get("/datacenters/{dc_id}", response_model=DatacenterWithRacks)
+@app.get("/datacenters/{dc_id}", response_model=DatacenterWithRacksAndDevices)
 def read_datacenter(dc_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     dc = session.get(Datacenter, dc_id)
     if not dc:
         raise HTTPException(status_code=404, detail="Datacenter not found")
+    # Filter out soft-deleted devices for all nested racks
+    for rack in dc.racks:
+        rack.devices = [d for d in rack.devices if d.deleted_at is None]
     return dc
 
 @app.patch("/datacenters/{dc_id}", response_model=DatacenterRead)
