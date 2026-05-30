@@ -11,7 +11,7 @@ from sqlmodel import Session, select, text
 from app.database import create_db_and_tables, get_session, engine
 from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory, User
 from app.schemas import (
-    DatacenterCreate, DatacenterRead, DatacenterWithRacks,
+    DatacenterCreate, DatacenterRead, DatacenterWithRacks, DatacenterUpdate,
     RackCreate, RackRead, RackWithDevices, RackUpdate,
     DeviceCreate, DeviceRead, DeviceUpdate,
     SystemConfigRead, SystemConfigUpdate,
@@ -221,6 +221,54 @@ def read_datacenter(dc_id: int, session: Session = Depends(get_session), _: User
         raise HTTPException(status_code=404, detail="Datacenter not found")
     return dc
 
+@app.patch("/datacenters/{dc_id}", response_model=DatacenterRead)
+def update_datacenter(dc_id: int, dc_update: DatacenterUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    db_dc = session.get(Datacenter, dc_id)
+    if not db_dc:
+        raise HTTPException(status_code=404, detail="Datacenter not found")
+    
+    dc_data = dc_update.dict(exclude_unset=True)
+    
+    # Validation: Ensure resizing doesn't orphan racks
+    new_width = dc_data.get("width", db_dc.width)
+    new_height = dc_data.get("height", db_dc.height)
+    
+    if new_width < db_dc.width or new_height < db_dc.height:
+        # Check if any racks are outside the new bounds
+        statement = select(Rack).where(Rack.datacenter_id == dc_id)
+        statement = statement.where((Rack.x_coord >= new_width) | (Rack.y_coord >= new_height))
+        offending_rack = session.exec(statement).first()
+        if offending_rack:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot resize: Rack '{offending_rack.name}' exists at {offending_rack.x_coord},{offending_rack.y_coord}"
+            )
+    
+    for key, value in dc_data.items():
+        setattr(db_dc, key, value)
+    
+    session.add(db_dc)
+    session.commit()
+    session.refresh(db_dc)
+    return db_dc
+
+@app.delete("/datacenters/{dc_id}")
+def delete_datacenter(dc_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    dc = session.get(Datacenter, dc_id)
+    if not dc:
+        raise HTTPException(status_code=404, detail="Datacenter not found")
+    
+    # SQLModel/SQLAlchemy doesn't have automatic cascade delete configured in the models,
+    # so we delete associated racks (and their devices)
+    for rack in dc.racks:
+        for device in rack.devices:
+            session.delete(device)
+        session.delete(rack)
+    
+    session.delete(dc)
+    session.commit()
+    return {"ok": True}
+
 @app.get("/datacenters/{dc_id}/export")
 def export_datacenter_csv(dc_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     dc = session.get(Datacenter, dc_id)
@@ -317,6 +365,22 @@ def update_rack(rack_id: int, rack_update: RackUpdate, session: Session = Depend
             raise HTTPException(status_code=400, detail=f"A rack named '{existing_rack.name}' already exists at {new_x},{new_y}")
 
     rack_data = rack_update.dict(exclude_unset=True)
+    
+    # Validation: Ensure resizing doesn't orphan devices
+    new_height_u = rack_data.get("height_u", db_rack.height_u)
+    if new_height_u < db_rack.height_u:
+        # Check if any devices exceed the new height
+        # Only check active devices (deleted_at is None)
+        statement = select(Device).where(Device.rack_id == rack_id).where(Device.deleted_at == None)
+        statement = statement.where(Device.start_u + Device.u_height - 1 > new_height_u)
+        offending_device = session.exec(statement).first()
+        if offending_device:
+            top_u = offending_device.start_u + offending_device.u_height - 1
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot resize: Device '{offending_device.name}' reaches up to {top_u}U"
+            )
+
     for key, value in rack_data.items():
         setattr(db_rack, key, value)
     
@@ -324,6 +388,20 @@ def update_rack(rack_id: int, rack_update: RackUpdate, session: Session = Depend
     session.commit()
     session.refresh(db_rack)
     return db_rack
+
+@app.delete("/racks/{rack_id}")
+def delete_rack(rack_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    rack = session.get(Rack, rack_id)
+    if not rack:
+        raise HTTPException(status_code=404, detail="Rack not found")
+    
+    # Delete associated devices
+    for device in rack.devices:
+        session.delete(device)
+        
+    session.delete(rack)
+    session.commit()
+    return {"ok": True}
 
 # --- Device Routes ---
 

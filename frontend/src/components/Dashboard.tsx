@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getDatacenters, createDatacenter } from '../api';
+import { getDatacenters, createDatacenter, deleteDatacenter } from '../api';
 import type { Datacenter } from '../types';
-import { MapPin, Info, Plus } from 'lucide-react';
+import { MapPin, Info, Plus, Trash2 } from 'lucide-react';
 import Modal from './Modal';
 import { useAuth } from '../context/AuthContext';
 
@@ -56,6 +56,21 @@ const Dashboard: React.FC = () => {
       .finally(() => setIsSubmitting(false));
   };
 
+  const handleDelete = (e: React.MouseEvent, dc: Datacenter) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isAdmin && window.confirm(`DANGER: Are you sure you want to delete ${dc.name}? This will delete ALL racks and devices in this location.`)) {
+      deleteDatacenter(dc.id)
+        .then(() => {
+          fetchDatacenters();
+        })
+        .catch(err => {
+          console.error("Failed to delete datacenter:", err);
+          alert("Failed to delete location.");
+        });
+    }
+  };
+
   if (loading && datacenters.length === 0) return <div className="text-center py-10">Loading locations...</div>;
 
   return (
@@ -87,9 +102,18 @@ const Dashboard: React.FC = () => {
           <Link 
             key={dc.id} 
             to={`/datacenter/${dc.id}`}
-            className="block bg-white border rounded-lg shadow-sm hover:shadow-md transition-shadow p-6"
+            className="group block bg-white border rounded-lg shadow-sm hover:shadow-md transition-shadow p-6 relative"
           >
-            <h2 className="text-xl font-semibold mb-2 flex items-center gap-2">
+            {isAdmin && (
+              <button 
+                onClick={(e) => handleDelete(e, dc)}
+                className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                title="Delete Location"
+              >
+                <Trash2 size={18} />
+              </button>
+            )}
+            <h2 className="text-xl font-semibold mb-2 flex items-center gap-2 pr-8">
               <MapPin className="text-blue-500" size={20} />
               {dc.name}
             </h2>

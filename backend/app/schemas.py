@@ -16,6 +16,13 @@ class DatacenterCreate(DatacenterBase):
 class DatacenterRead(DatacenterBase):
     id: int
 
+class DatacenterUpdate(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    description: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+
 # Rack Schemas
 class RackBase(BaseModel):
     name: str

@@ -36,6 +36,8 @@ export const deleteUser = (userId: number) => api.delete(`/users/${userId}`).the
 export const getDatacenters = () => api.get<Datacenter[]>('/datacenters/').then((res: any) => res.data);
 export const getDatacenter = (id: number) => api.get<DatacenterWithRacks>(`/datacenters/${id}`).then((res: any) => res.data);
 export const createDatacenter = (dc: Omit<Datacenter, 'id'>) => api.post<Datacenter>('/datacenters/', dc).then((res: any) => res.data);
+export const updateDatacenter = (id: number, dc: Partial<Datacenter>) => api.patch<Datacenter>(`/datacenters/${id}`, dc).then((res: any) => res.data);
+export const deleteDatacenter = (id: number) => api.delete(`/datacenters/${id}`).then((res: any) => res.data);
 export const getDatacenterExportUrl = (dcId: number) => `${API_URL}/datacenters/${dcId}/export`;
 
 // Racks
@@ -43,6 +45,7 @@ export const getRack = (id: number) => api.get<RackWithDevices>(`/racks/${id}`).
 export const getRacks = () => api.get<Rack[]>('/racks/').then((res: any) => res.data);
 export const createRack = (rack: Omit<Rack, 'id'>) => api.post<Rack>('/racks/', rack).then((res: any) => res.data);
 export const updateRack = (id: number, rack: Partial<Rack>) => api.patch<Rack>(`/racks/${id}`, rack).then((res: any) => res.data);
+export const deleteRack = (id: number) => api.delete(`/racks/${id}`).then((res: any) => res.data);
 
 // Devices
 export const createDevice = (device: any) => api.post<Device>('/devices/', device).then((res: any) => res.data);
