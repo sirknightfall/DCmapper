@@ -21,16 +21,31 @@ export interface Device {
   name: string;
   description?: string;
   device_type: string;
-  vendor_model: string;
+  vendor_model?: string;
   rack_id: number;
   start_u: number;
   u_height: number;
-  ip_addresses: string;
+  ip_addresses?: string;
   management_ip?: string;
   management_link?: string;
+  network_ports?: string;
+  owner?: string;
+  installation_date?: string;
+  custom_values?: Record<string, any>;
   status: 'Online' | 'Offline' | 'Unknown';
   last_checked?: string;
 }
+
+export interface DeviceField {
+  id: number;
+  name: string;
+  label: string;
+  field_type: string; // 'text' | 'number' | 'date' | 'url'
+  required: boolean;
+  is_custom: boolean;
+  is_active: boolean;
+}
+
 
 export interface DatacenterWithRacks extends Datacenter {
   racks: Rack[];

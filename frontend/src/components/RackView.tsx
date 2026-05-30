@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getRack, createDevice, updateDevice, deleteDevice, getDatacenters, getRacks, getDeviceHistory } from '../api';
-import type { RackWithDevices, Device, Datacenter, Rack, StatusHistory } from '../types';
+import { getRack, createDevice, updateDevice, deleteDevice, getDatacenters, getRacks, getDeviceHistory, getDeviceFields } from '../api';
+import type { RackWithDevices, Device, Datacenter, Rack, StatusHistory, DeviceField } from '../types';
 import { ChevronLeft, Plus, ExternalLink, Activity, Trash2, Move, Edit2, Clock } from 'lucide-react';
 import Modal from './Modal';
 import { useAuth } from '../context/AuthContext';
@@ -34,7 +34,9 @@ const RackView: React.FC = () => {
   const [targetRack, setTargetRack] = useState<RackWithDevices | null>(null);
   const [targetRackLoading, setTargetRackLoading] = useState(false);
   
-  const [newDevice, setNewDevice] = useState({
+  const [deviceFields, setDeviceFields] = useState<DeviceField[]>([]);
+
+  const [newDevice, setNewDevice] = useState<any>({
     name: '',
     description: '',
     device_type: 'Server',
@@ -45,10 +47,11 @@ const RackView: React.FC = () => {
     management_ip: '',
     management_link: '',
     owner: '',
-    network_ports: ''
+    network_ports: '',
+    custom_values: {}
   });
 
-  const [editDeviceData, setEditDeviceData] = useState({
+  const [editDeviceData, setEditDeviceData] = useState<any>({
     name: '',
     description: '',
     device_type: 'Server',
@@ -59,7 +62,8 @@ const RackView: React.FC = () => {
     management_ip: '',
     management_link: '',
     owner: '',
-    network_ports: ''
+    network_ports: '',
+    custom_values: {}
   });
 
   const fetchRack = () => {
@@ -99,6 +103,9 @@ const RackView: React.FC = () => {
 
   useEffect(() => {
     fetchRack();
+    getDeviceFields()
+      .then(setDeviceFields)
+      .catch(err => console.error("Failed to load device fields:", err));
   }, [id]);
 
   const clearModals = () => {
@@ -141,14 +148,15 @@ const RackView: React.FC = () => {
       name: device.name,
       description: device.description || '',
       device_type: device.device_type,
-      vendor_model: device.vendor_model,
+      vendor_model: device.vendor_model || '',
       start_u: device.start_u,
       u_height: device.u_height,
-      ip_addresses: device.ip_addresses,
+      ip_addresses: device.ip_addresses || '',
       management_ip: device.management_ip || '',
       management_link: device.management_link || '',
       owner: (device as any).owner || '',
-      network_ports: (device as any).network_ports || ''
+      network_ports: (device as any).network_ports || '',
+      custom_values: device.custom_values || {}
     });
     setError(null);
     setIsEditModalOpen(true);
@@ -210,13 +218,161 @@ const RackView: React.FC = () => {
           management_ip: '',
           management_link: '',
           owner: '',
-          network_ports: ''
+          network_ports: '',
+          custom_values: {}
         });
         fetchRack();
       }).catch(err => {
         setError(err.response?.data?.detail || "Failed to create device.");
       });
     }
+  };
+
+  const renderDeviceDetails = (device: Device) => {
+    const activeFields = deviceFields.filter(f => f.is_active);
+    
+    const getFieldValue = (field: DeviceField) => {
+      if (!field.is_custom) {
+        return device[field.name as keyof Device];
+      } else {
+        return device.custom_values?.[field.name];
+      }
+    };
+
+    const populatedFields = activeFields.filter(field => {
+      const val = getFieldValue(field);
+      return val !== undefined && val !== null && val !== '';
+    });
+
+    if (populatedFields.length === 0) return null;
+
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm mt-4 pt-4 border-t border-slate-50">
+        {populatedFields.map((field) => {
+          const val = getFieldValue(field);
+          
+          if (field.field_type === 'url') {
+            return (
+              <div key={field.id} className="col-span-1">
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">{field.label}</span>
+                <a href={String(val)} target="_blank" rel="noreferrer" className="text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+                  <span>Visit Link</span>
+                  <ExternalLink size={12} />
+                </a>
+              </div>
+            );
+          }
+
+          if (field.field_type === 'date') {
+            return (
+              <div key={field.id} className="col-span-1">
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">{field.label}</span>
+                <span>{new Date(String(val)).toLocaleDateString()}</span>
+              </div>
+            );
+          }
+
+          const isLong = field.name === 'description' || String(val).length > 40;
+          return (
+            <div key={field.id} className={isLong ? "col-span-2" : "col-span-1"}>
+              <span className="text-slate-400 block text-[10px] uppercase font-bold">{field.label}</span>
+              <span className="whitespace-pre-wrap">{String(val)}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderDynamicFields = (deviceState: any, setDeviceState: any) => {
+    const activeFields = deviceFields.filter(f => f.is_active);
+    
+    const getFieldValue = (field: DeviceField) => {
+      if (!field.is_custom) {
+        return deviceState[field.name] ?? '';
+      } else {
+        return deviceState.custom_values?.[field.name] ?? '';
+      }
+    };
+
+    const setFieldValue = (field: DeviceField, val: any) => {
+      if (!field.is_custom) {
+        setDeviceState((prev: any) => ({ ...prev, [field.name]: val }));
+      } else {
+        setDeviceState((prev: any) => ({
+          ...prev,
+          custom_values: {
+            ...(prev.custom_values || {}),
+            [field.name]: val
+          }
+        }));
+      }
+    };
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {activeFields.map((field) => {
+          const val = getFieldValue(field);
+          const inputId = `field_${field.name}`;
+          const isFullWidth = field.name === 'description';
+          
+          if (isFullWidth) {
+            return (
+              <div key={field.id} className="col-span-1 md:col-span-2">
+                <label htmlFor={inputId} className="block text-sm font-medium mb-1">
+                  {field.label} {field.required && <span className="text-red-500">*</span>}
+                </label>
+                <textarea
+                  id={inputId}
+                  required={field.required}
+                  rows={2}
+                  className="w-full border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  value={val}
+                  onChange={e => setFieldValue(field, e.target.value)}
+                />
+              </div>
+            );
+          }
+
+          let inputType = 'text';
+          if (field.field_type === 'number') inputType = 'number';
+          else if (field.field_type === 'date') inputType = 'date';
+          else if (field.field_type === 'url') inputType = 'url';
+
+          let displayVal = val;
+          if (field.field_type === 'date' && val) {
+            try {
+              displayVal = new Date(val).toISOString().split('T')[0];
+            } catch (e) {
+              displayVal = val;
+            }
+          }
+
+          return (
+            <div key={field.id} className="col-span-1">
+              <label htmlFor={inputId} className="block text-sm font-medium mb-1">
+                {field.label} {field.required && <span className="text-red-500">*</span>}
+              </label>
+              <input
+                id={inputId}
+                type={inputType}
+                required={field.required}
+                placeholder={field.field_type === 'url' ? 'https://...' : ''}
+                className="w-full border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                value={displayVal}
+                onChange={e => {
+                  let value: any = e.target.value;
+                  if (field.field_type === 'number') {
+                    value = value === '' ? '' : parseFloat(value);
+                  }
+                  setFieldValue(field, value);
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   if (loading && !rack) return <div className="text-center py-10">Loading rack view...</div>;
@@ -377,25 +533,7 @@ const RackView: React.FC = () => {
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4 text-sm mt-4">
-                  <div>
-                    <span className="text-slate-400 block text-[10px] uppercase font-bold">IP Addresses</span>
-                    <span>{device.ip_addresses}</span>
-                  </div>
-                  {device.management_ip && (
-                    <div>
-                      <span className="text-slate-400 block text-[10px] uppercase font-bold">Management</span>
-                      <div className="flex items-center gap-2">
-                        <span>{device.management_ip}</span>
-                        {device.management_link && (
-                          <a href={device.management_link} target="_blank" rel="noreferrer" className="text-blue-600 hover:text-blue-800">
-                            <ExternalLink size={14} />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                {renderDeviceDetails(device)}
 
                 {device.last_checked && (
                   <div className="mt-4 text-[10px] text-slate-400 italic">
@@ -433,30 +571,6 @@ const RackView: React.FC = () => {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Vendor/Model</label>
-              <input required className="w-full border rounded px-3 py-2" value={newDevice.vendor_model} onChange={e => setNewDevice({...newDevice, vendor_model: e.target.value})} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Owner</label>
-              <input className="w-full border rounded px-3 py-2" value={newDevice.owner} onChange={e => setNewDevice({...newDevice, owner: e.target.value})} placeholder="e.g. Infrastructure Team" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Description</label>
-            <textarea className="w-full border rounded px-3 py-2" rows={2} value={newDevice.description} onChange={e => setNewDevice({...newDevice, description: e.target.value})} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">IP Addresses</label>
-              <input required className="w-full border rounded px-3 py-2" value={newDevice.ip_addresses} onChange={e => setNewDevice({...newDevice, ip_addresses: e.target.value})} placeholder="1.2.3.4, 5.6.7.8" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Ports</label>
-              <input className="w-full border rounded px-3 py-2" value={newDevice.network_ports} onChange={e => setNewDevice({...newDevice, network_ports: e.target.value})} placeholder="e.g. 48x1G, 4x10G" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
               <label className="block text-sm font-medium mb-1">Start U</label>
               <input type="number" required className="w-full border rounded px-3 py-2" value={newDevice.start_u} onChange={e => setNewDevice({...newDevice, start_u: parseInt(e.target.value)})} />
             </div>
@@ -465,15 +579,9 @@ const RackView: React.FC = () => {
               <input type="number" required className="w-full border rounded px-3 py-2" value={newDevice.u_height} onChange={e => setNewDevice({...newDevice, u_height: parseInt(e.target.value)})} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Mgmt IP</label>
-              <input className="w-full border rounded px-3 py-2" value={newDevice.management_ip} onChange={e => setNewDevice({...newDevice, management_ip: e.target.value})} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Mgmt Link</label>
-              <input className="w-full border rounded px-3 py-2" value={newDevice.management_link} onChange={e => setNewDevice({...newDevice, management_link: e.target.value})} placeholder="https://..." />
-            </div>
+          <div className="border-t pt-4">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Device Properties</h3>
+            {renderDynamicFields(newDevice, setNewDevice)}
           </div>
           <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">
             Add Device
@@ -501,30 +609,6 @@ const RackView: React.FC = () => {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Vendor/Model</label>
-              <input required className="w-full border rounded px-3 py-2" value={editDeviceData.vendor_model} onChange={e => setEditDeviceData({...editDeviceData, vendor_model: e.target.value})} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Owner</label>
-              <input className="w-full border rounded px-3 py-2" value={editDeviceData.owner} onChange={e => setEditDeviceData({...editDeviceData, owner: e.target.value})} placeholder="e.g. Infrastructure Team" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Description</label>
-            <textarea className="w-full border rounded px-3 py-2" rows={2} value={editDeviceData.description} onChange={e => setEditDeviceData({...editDeviceData, description: e.target.value})} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">IP Addresses</label>
-              <input required className="w-full border rounded px-3 py-2" value={editDeviceData.ip_addresses} onChange={e => setEditDeviceData({...editDeviceData, ip_addresses: e.target.value})} placeholder="1.2.3.4, 5.6.7.8" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Ports</label>
-              <input className="w-full border rounded px-3 py-2" value={editDeviceData.network_ports} onChange={e => setEditDeviceData({...editDeviceData, network_ports: e.target.value})} placeholder="e.g. 48x1G, 4x10G" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
               <label className="block text-sm font-medium mb-1">Start U</label>
               <input type="number" required className="w-full border rounded px-3 py-2" value={editDeviceData.start_u} onChange={e => setEditDeviceData({...editDeviceData, start_u: parseInt(e.target.value)})} />
             </div>
@@ -533,15 +617,9 @@ const RackView: React.FC = () => {
               <input type="number" required className="w-full border rounded px-3 py-2" value={editDeviceData.u_height} onChange={e => setEditDeviceData({...editDeviceData, u_height: parseInt(e.target.value)})} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Mgmt IP</label>
-              <input className="w-full border rounded px-3 py-2" value={editDeviceData.management_ip} onChange={e => setEditDeviceData({...editDeviceData, management_ip: e.target.value})} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Mgmt Link</label>
-              <input className="w-full border rounded px-3 py-2" value={editDeviceData.management_link} onChange={e => setEditDeviceData({...editDeviceData, management_link: e.target.value})} placeholder="https://..." />
-            </div>
+          <div className="border-t pt-4">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Device Properties</h3>
+            {renderDynamicFields(editDeviceData, setEditDeviceData)}
           </div>
           <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">
             Save Changes

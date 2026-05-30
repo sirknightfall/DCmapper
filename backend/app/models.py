@@ -1,6 +1,7 @@
 from typing import List, Optional
 from datetime import datetime
 from sqlmodel import SQLModel, Field, Relationship
+from sqlalchemy import Column, JSON
 
 class Datacenter(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -28,7 +29,7 @@ class Device(SQLModel, table=True):
     name: str
     description: Optional[str] = None
     device_type: str # e.g., Server, TOR Switch
-    vendor_model: str
+    vendor_model: Optional[str] = None
     
     # Rack location
     rack_id: int = Field(foreign_key="rack.id")
@@ -36,7 +37,7 @@ class Device(SQLModel, table=True):
     u_height: int = Field(default=1)
     
     # Networking
-    ip_addresses: str # Comma-separated or JSON string
+    ip_addresses: Optional[str] = None # Comma-separated or JSON string
     management_ip: Optional[str] = None
     management_link: Optional[str] = None
     
@@ -45,6 +46,9 @@ class Device(SQLModel, table=True):
     owner: Optional[str] = None
     installation_date: Optional[datetime] = None
     
+    # Custom values dictionary
+    custom_values: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    
     # Status
     status: str = Field(default="Unknown") # Online, Offline, Unknown
     last_checked: Optional[datetime] = None
@@ -52,6 +56,15 @@ class Device(SQLModel, table=True):
     
     rack: Rack = Relationship(back_populates="devices")
     status_history: List["StatusHistory"] = Relationship(back_populates="device")
+
+class DeviceField(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True) # slug/key, e.g., "serial_number"
+    label: str
+    field_type: str = Field(default="text") # text, number, date, url
+    required: bool = Field(default=False)
+    is_custom: bool = Field(default=True)
+    is_active: bool = Field(default=True)
 
 class StatusHistory(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -73,4 +86,5 @@ class User(SQLModel, table=True):
     role: str = Field(default="viewer") # admin, viewer
     is_active: bool = Field(default=True)
     last_login: Optional[datetime] = None
+
 

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { getConfig, updateConfig, updateOwnPassword } from '../api';
-import { Settings, Save, AlertCircle, CheckCircle, Database, Lock, Users, Key } from 'lucide-react';
+import { getConfig, updateConfig, updateOwnPassword, getDeviceFields, createDeviceField, updateDeviceField, deleteDeviceField } from '../api';
+import { Settings, Save, AlertCircle, CheckCircle, Database, Lock, Users, Key, Plus, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import type { DeviceField } from '../types';
 
 const Config: React.FC = () => {
   const { isAdmin } = useAuth();
@@ -14,19 +15,28 @@ const Config: React.FC = () => {
   const [interval, setIntervalValue] = useState(60);
   const [retention, setRetention] = useState(365);
 
+  // Device Fields State
+  const [deviceFields, setDeviceFields] = useState<DeviceField[]>([]);
+  const [newFieldLabel, setNewFieldLabel] = useState('');
+  const [newFieldType, setNewFieldType] = useState('text');
+  const [newFieldRequired, setNewFieldRequired] = useState(false);
+  const [fieldMessage, setFieldMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [isAddingField, setIsAddingField] = useState(false);
+
   // Self-service Password State
   const [passwordData, setPasswordData] = useState({ new: '', confirm: '' });
   const [passMessage, setPassMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [isUpdatingPass, setIsUpdatingPass] = useState(false);
 
   useEffect(() => {
-    getConfig()
-      .then(data => {
-        setIntervalValue(data.check_interval_seconds);
-        setRetention(data.retention_days);
+    Promise.all([getConfig(), getDeviceFields()])
+      .then(([configData, fieldsData]) => {
+        setIntervalValue(configData.check_interval_seconds);
+        setRetention(configData.retention_days);
+        setDeviceFields(fieldsData);
       })
       .catch(err => {
-        console.error("Failed to fetch config:", err);
+        console.error("Failed to fetch config or fields:", err);
         setMessage({ text: "Failed to load system configuration.", type: 'error' });
       })
       .finally(() => setLoading(false));
@@ -77,6 +87,76 @@ const Config: React.FC = () => {
         setPassMessage({ text: err.response?.data?.detail || "Failed to update password.", type: 'error' });
       })
       .finally(() => setIsUpdatingPass(false));
+  };
+
+  const handleAddField = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFieldLabel.trim()) return;
+
+    setIsAddingField(true);
+    setFieldMessage(null);
+
+    createDeviceField({
+      label: newFieldLabel.trim(),
+      field_type: newFieldType,
+      required: newFieldRequired
+    })
+      .then(newField => {
+        setDeviceFields(prev => [...prev, newField]);
+        setNewFieldLabel('');
+        setNewFieldType('text');
+        setNewFieldRequired(false);
+        setFieldMessage({ text: "Custom field added successfully.", type: 'success' });
+      })
+      .catch(err => {
+        console.error("Failed to create field:", err);
+        setFieldMessage({ text: err.response?.data?.detail || "Failed to create field.", type: 'error' });
+      })
+      .finally(() => setIsAddingField(false));
+  };
+
+  const handleToggleActive = (field: DeviceField) => {
+    if (!isAdmin) return;
+    const newActive = !field.is_active;
+    updateDeviceField(field.id, { is_active: newActive })
+      .then(updated => {
+        setDeviceFields(prev => prev.map(f => f.id === field.id ? updated : f));
+      })
+      .catch(err => {
+        console.error("Failed to update active state:", err);
+      });
+  };
+
+  const handleToggleRequired = (field: DeviceField) => {
+    if (!isAdmin) return;
+    const newReq = !field.required;
+    updateDeviceField(field.id, { required: newReq })
+      .then(updated => {
+        setDeviceFields(prev => prev.map(f => f.id === field.id ? updated : f));
+      })
+      .catch(err => {
+        console.error("Failed to update required state:", err);
+      });
+  };
+
+  const handleDeleteField = (field: DeviceField) => {
+    if (!isAdmin) return;
+    if (!window.confirm(`Are you sure you want to delete/deactivate "${field.label}"?`)) return;
+
+    deleteDeviceField(field.id)
+      .then(() => {
+        if (field.is_custom) {
+          setDeviceFields(prev => prev.filter(f => f.id !== field.id));
+        } else {
+          // Built-in fields get deactivated in database
+          setDeviceFields(prev => prev.map(f => f.id === field.id ? { ...f, is_active: false } : f));
+        }
+        setFieldMessage({ text: `Field "${field.label}" removed successfully.`, type: 'success' });
+      })
+      .catch(err => {
+        console.error("Failed to delete field:", err);
+        setFieldMessage({ text: "Failed to remove field.", type: 'error' });
+      });
   };
 
   if (loading) return <div className="text-center py-10">Loading system settings...</div>;
@@ -188,6 +268,155 @@ const Config: React.FC = () => {
               </div>
             )}
           </form>
+        </div>
+      </div>
+
+      {/* Server Fields Configuration */}
+      <div>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <Settings size={28} className="text-slate-700" />
+            <h1 className="text-2xl font-bold">Server Fields Configuration</h1>
+          </div>
+        </div>
+
+        <div className="bg-white border rounded-lg shadow-sm p-6 space-y-6">
+          <div>
+            <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-2">Configure Server Fields</h2>
+            <p className="text-xs text-slate-500 mb-4">
+              Toggle which fields are active, configure if they are required or optional, or add/remove completely custom attributes for server devices.
+            </p>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-slate-100 text-slate-500 font-medium">
+                  <th className="py-2">Field Label</th>
+                  <th className="py-2">Type</th>
+                  <th className="py-2">Active</th>
+                  <th className="py-2">Required</th>
+                  <th className="py-2 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {deviceFields.map((field) => (
+                  <tr key={field.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="py-3 font-medium text-slate-800">
+                      {field.label}
+                      {!field.is_custom && (
+                        <span className="ml-2 inline-block px-1.5 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-600 rounded">
+                          BUILT-IN
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 text-slate-500 font-mono text-xs uppercase">{field.field_type}</td>
+                    <td className="py-3">
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => handleToggleActive(field)}
+                        className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${
+                          field.is_active
+                            ? 'bg-green-50 text-green-700 border border-green-200 hover:bg-green-100'
+                            : 'bg-slate-100 text-slate-400 border border-slate-200 hover:bg-slate-200'
+                        }`}
+                      >
+                        {field.is_active ? 'Active' : 'Disabled'}
+                      </button>
+                    </td>
+                    <td className="py-3">
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => handleToggleRequired(field)}
+                        className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${
+                          field.required
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
+                            : 'bg-slate-50 text-slate-500 border border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {field.required ? 'Required' : 'Optional'}
+                      </button>
+                    </td>
+                    <td className="py-3 text-right">
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteField(field)}
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded transition-all animate-pulse"
+                          title={field.is_custom ? 'Delete Custom Field' : 'Deactivate Built-In Field'}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Add Custom Field Section */}
+          {isAdmin && (
+            <div className="pt-6 border-t border-slate-100">
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4">Add Custom Field</h3>
+              <form onSubmit={handleAddField} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end bg-slate-50 p-4 rounded-lg border border-dashed border-slate-200">
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Field Label / Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Serial Number, Asset Tag"
+                    className="w-full border rounded px-3 py-2 text-sm bg-white"
+                    value={newFieldLabel}
+                    onChange={(e) => setNewFieldLabel(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Field Type</label>
+                  <select
+                    className="w-full border rounded px-3 py-2 text-sm bg-white"
+                    value={newFieldType}
+                    onChange={(e) => setNewFieldType(e.target.value)}
+                  >
+                    <option value="text">Text</option>
+                    <option value="number">Number</option>
+                    <option value="date">Date</option>
+                    <option value="url">URL Link</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-4 h-10">
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4"
+                      checked={newFieldRequired}
+                      onChange={(e) => setNewFieldRequired(e.target.checked)}
+                    />
+                    Required Field
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={isAddingField || !newFieldLabel.trim()}
+                    className="ml-auto bg-blue-600 hover:bg-blue-700 text-white p-2.5 rounded transition-colors flex items-center justify-center gap-1 font-bold text-xs"
+                  >
+                    <Plus size={16} />
+                    <span>Add</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {fieldMessage && (
+            <div className={`flex items-center gap-2 p-3 rounded text-sm ${
+              fieldMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
+            }`}>
+              {fieldMessage.type === 'success' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
+              {fieldMessage.text}
+            </div>
+          )}
         </div>
       </div>
 

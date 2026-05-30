@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Datacenter, DatacenterWithRacks, Rack, RackWithDevices, Device, SystemConfig, StatusHistory } from './types';
+import type { Datacenter, DatacenterWithRacks, Rack, RackWithDevices, Device, SystemConfig, StatusHistory, DeviceField } from './types';
 
 const getBaseUrl = () => {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
@@ -22,6 +22,19 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// Add response interceptor to handle token expiration/invalidation
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response && error.response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/';
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Auth
 export const login = (data: any) => api.post('/token', data).then((res: any) => res.data);
@@ -56,3 +69,10 @@ export const getDeviceHistory = (deviceId: number) => api.get<StatusHistory[]>(`
 // Config
 export const getConfig = () => api.get<SystemConfig>('/config/').then((res: any) => res.data);
 export const updateConfig = (config: Partial<SystemConfig>) => api.patch<SystemConfig>('/config/', config).then((res: any) => res.data);
+
+// Device Fields
+export const getDeviceFields = () => api.get<DeviceField[]>('/device-fields/').then((res: any) => res.data);
+export const createDeviceField = (field: Omit<DeviceField, 'id' | 'name' | 'is_custom' | 'is_active'>) => api.post<DeviceField>('/device-fields/', field).then((res: any) => res.data);
+export const updateDeviceField = (id: number, field: Partial<DeviceField>) => api.patch<DeviceField>(`/device-fields/${id}`, field).then((res: any) => res.data);
+export const deleteDeviceField = (id: number) => api.delete(`/device-fields/${id}`).then((res: any) => res.data);
+

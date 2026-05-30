@@ -50,8 +50,8 @@ async def status_monitor_task():
                 print(f"Error fetching config: {e}")
 
             # Fetch all devices that have at least one IP address and are not deleted
-            statement = select(Device).where(Device.ip_addresses != "").where(Device.deleted_at == None)
-            devices = session.exec(statement).all()
+            statement = select(Device).where(Device.deleted_at == None)
+            devices = [d for d in session.exec(statement).all() if d.ip_addresses]
             
             for device in devices:
                 # We assume the first IP in a comma-separated list for simplicity

@@ -48,16 +48,17 @@ class DeviceBase(BaseModel):
     name: str
     description: Optional[str] = None
     device_type: str
-    vendor_model: str
+    vendor_model: Optional[str] = None
     rack_id: int
     start_u: int
     u_height: int = 1
-    ip_addresses: str
+    ip_addresses: Optional[str] = None
     management_ip: Optional[str] = None
     management_link: Optional[str] = None
     network_ports: Optional[str] = None
     owner: Optional[str] = None
     installation_date: Optional[datetime] = None
+    custom_values: Optional[dict] = None
 
 class DeviceCreate(DeviceBase):
     pass
@@ -83,6 +84,20 @@ class DeviceUpdate(BaseModel):
     owner: Optional[str] = None
     installation_date: Optional[datetime] = None
     status: Optional[str] = None
+    custom_values: Optional[dict] = None
+
+# Device Field Schemas
+class DeviceFieldCreate(BaseModel):
+    label: str
+    field_type: str = "text"
+    required: bool = False
+
+class DeviceFieldUpdate(BaseModel):
+    label: Optional[str] = None
+    field_type: Optional[str] = None
+    required: Optional[bool] = None
+    is_active: Optional[bool] = None
+
 
 # System Config Schemas
 class SystemConfigRead(BaseModel):

@@ -9,14 +9,15 @@ import csv
 import io
 from sqlmodel import Session, select, text
 from app.database import create_db_and_tables, get_session, engine
-from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory, User
+from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory, User, DeviceField
 from app.schemas import (
     DatacenterCreate, DatacenterRead, DatacenterWithRacks, DatacenterUpdate,
     RackCreate, RackRead, RackWithDevices, RackUpdate,
     DeviceCreate, DeviceRead, DeviceUpdate,
     SystemConfigRead, SystemConfigUpdate,
     StatusHistoryRead,
-    UserRead, UserCreate, UserUpdatePassword, Token
+    UserRead, UserCreate, UserUpdatePassword, Token,
+    DeviceFieldCreate, DeviceFieldUpdate
 )
 from app.tasks import status_monitor_task, cleanup_deleted_devices_task
 from app.auth import (
@@ -62,6 +63,36 @@ async def on_startup():
             session.commit()
         except Exception:
             session.rollback()
+
+    # Simple migration: add custom_values to device if missing
+    with Session(engine) as session:
+        try:
+            session.execute(text("ALTER TABLE device ADD COLUMN custom_values TEXT DEFAULT '{}'"))
+            session.commit()
+        except Exception:
+            session.rollback()
+
+    # Ensure default fields exist
+    try:
+        with Session(engine) as session:
+            field = session.exec(select(DeviceField)).first()
+            if not field:
+                print("Seeding default device fields...")
+                default_fields = [
+                    DeviceField(name="description", label="Description", field_type="text", required=False, is_custom=False, is_active=True),
+                    DeviceField(name="vendor_model", label="Vendor / Model", field_type="text", required=True, is_custom=False, is_active=True),
+                    DeviceField(name="ip_addresses", label="IP Addresses", field_type="text", required=True, is_custom=False, is_active=True),
+                    DeviceField(name="management_ip", label="Management IP", field_type="text", required=False, is_custom=False, is_active=True),
+                    DeviceField(name="management_link", label="Management Link", field_type="url", required=False, is_custom=False, is_active=True),
+                    DeviceField(name="network_ports", label="Network Ports", field_type="text", required=False, is_custom=False, is_active=True),
+                    DeviceField(name="owner", label="Owner", field_type="text", required=False, is_custom=False, is_active=True),
+                    DeviceField(name="installation_date", label="Installation Date", field_type="date", required=False, is_custom=False, is_active=True),
+                ]
+                session.add_all(default_fields)
+                session.commit()
+                print("Device fields seeded successfully.")
+    except Exception as e:
+        print(f"Error seeding device fields: {e}")
 
     # Ensure default config exists
     try:
@@ -433,10 +464,56 @@ def validate_device_placement(session: Session, rack_id: int, start_u: int, u_he
                 detail=f"Placement overlap with device '{device.name}' ({device.start_u}U-{device_end-1}U)"
             )
 
+def validate_device_fields(session: Session, device_data: dict, is_update: bool = False, current_device = None):
+    # Fetch all active fields
+    active_fields = session.exec(select(DeviceField).where(DeviceField.is_active == True)).all()
+    
+    # Get custom values
+    custom_vals = device_data.get("custom_values") or {}
+    
+    # Clean up custom values to only hold active custom fields
+    cleaned_custom_vals = {}
+    
+    for field in active_fields:
+        val = None
+        if not field.is_custom:
+            # Built-in field. In update, check if it's explicitly set or use current
+            if field.name in device_data:
+                val = device_data[field.name]
+            elif is_update and current_device:
+                val = getattr(current_device, field.name, None)
+        else:
+            # Custom field
+            if field.name in custom_vals:
+                val = custom_vals[field.name]
+            elif is_update and current_device and current_device.custom_values:
+                val = current_device.custom_values.get(field.name, None)
+            
+            # Save to cleaned custom values
+            if val is not None:
+                cleaned_custom_vals[field.name] = val
+        
+        # Check required constraint
+        if field.required:
+            if val is None or (isinstance(val, str) and val.strip() == ""):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Field '{field.label}' is required"
+                )
+                
+    # Update device_data['custom_values'] with cleaned values
+    device_data["custom_values"] = cleaned_custom_vals
+
 @app.post("/devices/", response_model=DeviceRead)
 def create_device(device: DeviceCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     validate_device_placement(session, device.rack_id, device.start_u, device.u_height)
-    db_device = Device.from_orm(device)
+    
+    # Validate and clean dynamic fields
+    device_dict = device.dict()
+    validate_device_fields(session, device_dict)
+    
+    # Create the device with the updated/cleaned dict
+    db_device = Device(**device_dict)
     session.add(db_device)
     session.commit()
     session.refresh(db_device)
@@ -466,9 +543,19 @@ def update_device(device_id: int, device_update: DeviceUpdate, session: Session 
         new_u_height != db_device.u_height):
         validate_device_placement(session, new_rack_id, new_start_u, new_u_height, exclude_device_id=device_id)
 
-    device_data = device_update.dict(exclude_unset=True)
-    for key, value in device_data.items():
-        setattr(db_device, key, value)
+    # Validate and clean dynamic fields
+    device_update_dict = device_update.dict(exclude_unset=True)
+    validate_device_fields(session, device_update_dict, is_update=True, current_device=db_device)
+
+    # Apply updates
+    for key, value in device_update_dict.items():
+        if key == "custom_values":
+            # Merge with existing custom values
+            existing = db_device.custom_values or {}
+            existing.update(value)
+            db_device.custom_values = existing
+        else:
+            setattr(db_device, key, value)
     
     session.add(db_device)
     session.commit()
@@ -525,3 +612,74 @@ def update_config(config_update: SystemConfigUpdate, session: Session = Depends(
     session.commit()
     session.refresh(config)
     return config
+
+# --- Device Field Config Routes ---
+
+@app.get("/device-fields/", response_model=List[DeviceField])
+def read_device_fields(session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
+    fields = session.exec(select(DeviceField)).all()
+    return fields
+
+@app.post("/device-fields/", response_model=DeviceField)
+def create_device_field(field: DeviceFieldCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    # Automatically generate a clean name/slug from the label
+    name_slug = "".join(c for c in field.label.lower().replace(" ", "_") if c.isalnum() or c == "_")
+    if not name_slug:
+        raise HTTPException(status_code=400, detail="Invalid label.")
+        
+    # Check for duplicate name
+    existing = session.exec(select(DeviceField).where(DeviceField.name == name_slug)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"A field with label '{field.label}' (slug '{name_slug}') already exists.")
+        
+    db_field = DeviceField(
+        name=name_slug,
+        label=field.label,
+        field_type=field.field_type,
+        required=field.required,
+        is_custom=True,
+        is_active=True
+    )
+    
+    session.add(db_field)
+    session.commit()
+    session.refresh(db_field)
+    return db_field
+
+@app.patch("/device-fields/{field_id}", response_model=DeviceField)
+def update_device_field(field_id: int, field_update: DeviceFieldUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    db_field = session.get(DeviceField, field_id)
+    if not db_field:
+        raise HTTPException(status_code=404, detail="Device field not found")
+        
+    if field_update.label is not None:
+        db_field.label = field_update.label
+    if field_update.field_type is not None:
+        db_field.field_type = field_update.field_type
+    if field_update.required is not None:
+        db_field.required = field_update.required
+    if field_update.is_active is not None:
+        db_field.is_active = field_update.is_active
+        
+    session.add(db_field)
+    session.commit()
+    session.refresh(db_field)
+    return db_field
+
+@app.delete("/device-fields/{field_id}")
+def delete_device_field(field_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    db_field = session.get(DeviceField, field_id)
+    if not db_field:
+        raise HTTPException(status_code=404, detail="Device field not found")
+        
+    if not db_field.is_custom:
+        # Built-in fields cannot be deleted from the schema, only deactivated/removed from view!
+        db_field.is_active = False
+        session.add(db_field)
+        session.commit()
+        return {"ok": True, "message": "Built-in field deactivated"}
+    
+    session.delete(db_field)
+    session.commit()
+    return {"ok": True}
+
