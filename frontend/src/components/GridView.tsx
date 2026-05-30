@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getDatacenter, createRack, updateRack, deleteRack, updateDatacenter, deleteDatacenter, downloadDatacenterExport } from '../api';
+import { getDatacenter, createRack, updateRack, deleteRack, updateDatacenter, deleteDatacenter, downloadDatacenterExport, analyzeImport, commitImport } from '../api';
 import type { DatacenterWithRacks, Rack } from '../types';
-import { ChevronLeft, Plus, Download, Settings, Trash2 } from 'lucide-react';
+import { ChevronLeft, Plus, Download, Settings, Trash2, Upload } from 'lucide-react';
 import Modal from './Modal';
 import { useAuth } from '../context/AuthContext';
 
@@ -18,6 +18,11 @@ const GridView: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDcModalOpen, setIsDcModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importAnalysis, setImportAnalysis] = useState<any | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState(false);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +31,52 @@ const GridView: React.FC = () => {
   const [selectedRack, setSelectedRack] = useState<Rack | null>(null);
   const [editRackData, setEditRackData] = useState({ name: '', x: 0, y: 0, h: 42 });
   const [dcData, setDcData] = useState({ name: '', address: '', description: '', width: 10, height: 10 });
+
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      setImportFile(file);
+      setImportAnalysis(null);
+      setImportError(null);
+      setImportSuccess(false);
+      
+      if (id) {
+        setIsSubmitting(true);
+        analyzeImport(parseInt(id), file)
+          .then(data => {
+            setImportAnalysis(data);
+            if (!data.valid) {
+              setImportError("Validation errors found in file. Please correct them below before executing.");
+            }
+          })
+          .catch(err => {
+            const msg = err.response?.data?.detail || err.message || "Failed to analyze import file.";
+            setImportError(msg);
+          })
+          .finally(() => {
+            setIsSubmitting(false);
+          });
+      }
+    }
+  };
+
+  const executeImport = () => {
+    if (!id || !importAnalysis || !importAnalysis.valid) return;
+    setIsSubmitting(true);
+    setImportError(null);
+    commitImport(parseInt(id), importAnalysis)
+      .then(() => {
+        setImportSuccess(true);
+        fetchDC();
+      })
+      .catch(err => {
+        const msg = err.response?.data?.detail || err.message || "Failed to execute import.";
+        setImportError(msg);
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+      });
+  };
 
   const fetchDC = () => {
     if (id) {
@@ -210,6 +261,22 @@ const GridView: React.FC = () => {
             <Download size={18} />
             <span>Export CSV</span>
           </button>
+          {isAdmin && (
+            <button 
+              onClick={() => {
+                setError(null);
+                setImportFile(null);
+                setImportAnalysis(null);
+                setImportError(null);
+                setImportSuccess(false);
+                setIsImportModalOpen(true);
+              }}
+              className="flex items-center gap-1 bg-slate-100 text-slate-700 px-4 py-2 rounded shadow-sm hover:bg-slate-200 transition-colors"
+            >
+              <Upload size={18} />
+              <span>Import Wizard</span>
+            </button>
+          )}
           {isAdmin && (
             <>
               <button 
@@ -544,6 +611,136 @@ const GridView: React.FC = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} title="Bulk Datacenter Importer Wizard" size="3xl">
+        <div className="space-y-6">
+          {importSuccess ? (
+            <div className="text-center py-8 space-y-4">
+              <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto text-3xl font-bold">
+                ✓
+              </div>
+              <h3 className="text-lg font-bold text-slate-800">Import Completed Successfully!</h3>
+              <p className="text-sm text-slate-600">
+                Created/updated <strong>{importAnalysis?.racks?.length || 0}</strong> racks and housed <strong>{importAnalysis?.devices?.length || 0}</strong> devices successfully inside SQLite.
+              </p>
+              <button
+                onClick={() => setIsImportModalOpen(false)}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg transition-colors"
+              >
+                Close Wizard
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="bg-slate-50 border rounded-lg p-4 text-xs text-slate-600 space-y-2">
+                <h4 className="font-bold text-slate-800 uppercase tracking-wider">CSV Data Template Format</h4>
+                <p>Upload a CSV file containing racks and devices. Standard column headers mapped automatically:</p>
+                <div className="font-mono bg-slate-900 text-slate-200 p-2 rounded overflow-x-auto text-[10px]">
+                  Type,Name,Rack,X Coord,Y Coord,Start U,U Height,Device Type,IP Addresses,Management IP<br/>
+                  rack,Rack-A,,2,3,,42,,,<br/>
+                  device,core-switch-01,Rack-A,,,1,2,TOR Switch,10.0.0.1,10.0.0.254<br/>
+                  device,web-srv-12,Rack-A,,,15,2,Server,192.168.1.12,
+                </div>
+                <p className="text-[10px] text-slate-500 italic mt-1">
+                  * Coordinates are 0-indexed and must stay within the floor plan dimensions. U-slots are validated for overlapping conflicts.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-slate-700">Select Datacenter CSV Template</label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleImportFileChange}
+                  disabled={isSubmitting}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 text-sm bg-white hover:border-slate-400 cursor-pointer disabled:opacity-50"
+                />
+                {importFile && (
+                  <div className="text-xs text-slate-500 mt-1">
+                    Selected file: <strong>{importFile.name}</strong> ({(importFile.size / 1024).toFixed(1)} KB)
+                  </div>
+                )}
+              </div>
+
+              {isSubmitting && (
+                <div className="flex items-center justify-center gap-2 py-6 text-blue-600 animate-pulse text-sm">
+                  <span className="animate-spin border-2 border-current border-t-transparent rounded-full w-4 h-4 animate-pulse" />
+                  <span>Parsing records and executing structural assertions...</span>
+                </div>
+              )}
+
+              {importError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg space-y-2">
+                  <span className="font-bold text-sm block">⚠️ Import Execution Alert</span>
+                  <p className="text-xs font-semibold">{importError}</p>
+                  
+                  {importAnalysis?.errors && importAnalysis.errors.length > 0 && (
+                    <div className="max-h-40 overflow-y-auto text-[11px] font-mono space-y-1 mt-2 bg-red-100/50 p-2 rounded border border-red-200/50">
+                      {importAnalysis.errors.map((err: string, i: number) => (
+                        <div key={i} className="text-red-800">Line Check Error: {err}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {importAnalysis && !isSubmitting && (
+                <div className="space-y-4">
+                  {importAnalysis.valid && (
+                    <div className="bg-green-50 border border-green-200 text-green-800 p-3 rounded-lg text-xs font-semibold flex items-center gap-2">
+                      <span className="text-lg">✨</span>
+                      <span>Analysis verification complete! 0 boundary errors, 0 slot overlaps. 100% safe to commit.</span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="border border-slate-100 bg-slate-50/50 p-3 rounded-lg">
+                      <span className="text-xs uppercase font-bold tracking-wider text-slate-500 block mb-2">Racks ({importAnalysis.racks.length})</span>
+                      <div className="max-h-36 overflow-y-auto space-y-1">
+                        {importAnalysis.racks.map((r: any, i: number) => (
+                          <div key={i} className="flex justify-between items-center text-[11px] bg-white border border-slate-100 px-2 py-1 rounded">
+                            <span className="font-semibold text-slate-700">{r.name}</span>
+                            <span className="text-slate-500">Coord: ({r.x_coord},{r.y_coord}) | {r.height_u}U</span>
+                          </div>
+                        ))}
+                        {importAnalysis.racks.length === 0 && (
+                          <span className="text-slate-400 italic text-[11px] block text-center py-4">No new racks</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="border border-slate-100 bg-slate-50/50 p-3 rounded-lg">
+                      <span className="text-xs uppercase font-bold tracking-wider text-slate-500 block mb-2">Devices ({importAnalysis.devices.length})</span>
+                      <div className="max-h-36 overflow-y-auto space-y-1">
+                        {importAnalysis.devices.map((d: any, i: number) => (
+                          <div key={i} className="flex justify-between items-center text-[11px] bg-white border border-slate-100 px-2 py-1 rounded">
+                            <span className="font-semibold text-slate-700 truncate max-w-[120px]">{d.name}</span>
+                            <span className="text-slate-500 shrink-0">{d.rack_name} | U{d.start_u} ({d.u_height}U)</span>
+                          </div>
+                        ))}
+                        {importAnalysis.devices.length === 0 && (
+                          <span className="text-slate-400 italic text-[11px] block text-center py-4">No devices</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {importAnalysis.valid && (
+                    <button
+                      type="button"
+                      onClick={executeImport}
+                      disabled={isSubmitting}
+                      className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-1 shadow"
+                    >
+                      <span>Execute Import Transaction ({importAnalysis.racks.length + importAnalysis.devices.length} elements)</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </Modal>
     </div>
   );

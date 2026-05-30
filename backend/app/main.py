@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query, Response, status
+from fastapi import FastAPI, Depends, HTTPException, Query, Response, status, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
@@ -305,6 +305,276 @@ def delete_datacenter(dc_id: int, session: Session = Depends(get_session), _: Us
     session.delete(dc)
     session.commit()
     return {"ok": True}
+
+@app.post("/datacenters/{dc_id}/import/analyze")
+async def analyze_import(dc_id: int, file: UploadFile = File(...), session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    dc = session.get(Datacenter, dc_id)
+    if not dc:
+        raise HTTPException(status_code=404, detail="Datacenter not found")
+        
+    content = await file.read()
+    decoded = content.decode('utf-8', errors='ignore')
+    
+    reader = csv.reader(io.StringIO(decoded))
+    rows = list(reader)
+    
+    if len(rows) < 2:
+        return {"valid": False, "errors": ["File is empty or missing headers."], "racks": [], "devices": []}
+        
+    headers = [h.strip().lower() for h in rows[0]]
+    
+    def get_val(row, aliases, default=None):
+        for alias in aliases:
+            if alias in headers:
+                idx = headers.index(alias)
+                if idx < len(row):
+                    return row[idx].strip()
+        return default
+
+    parsed_racks = []
+    parsed_devices = []
+    errors = []
+    
+    imported_coords = set()
+    existing_coords = {(r.x_coord, r.y_coord): r.name for r in dc.racks}
+    existing_racks = {r.name.lower(): r for r in dc.racks}
+    proposed_racks = set()
+    
+    # Phase 1: Parse Racks
+    for idx, row in enumerate(rows[1:], start=2):
+        if not row or not any(row):
+            continue
+        row_type = get_val(row, ["type"], "device").lower()
+        if row_type == "rack":
+            name = get_val(row, ["name", "rack name", "rack_name"])
+            if not name:
+                errors.append(f"Row {idx}: Rack is missing a Name.")
+                continue
+                
+            x_str = get_val(row, ["x", "x coord", "x coordinate", "x_coord"])
+            y_str = get_val(row, ["y", "y coord", "y coordinate", "y_coord"])
+            height_str = get_val(row, ["height", "u height", "height u", "height_u", "height (u)", "slots"], "42")
+            
+            if x_str is None or y_str is None:
+                errors.append(f"Row {idx} (Rack {name}): Missing X or Y coordinates.")
+                continue
+                
+            try:
+                x = int(x_str)
+                y = int(y_str)
+            except ValueError:
+                errors.append(f"Row {idx} (Rack {name}): X and Y coordinates must be integers (got '{x_str}', '{y_str}').")
+                continue
+                
+            try:
+                height = int(height_str)
+            except ValueError:
+                errors.append(f"Row {idx} (Rack {name}): U height must be an integer (got '{height_str}').")
+                continue
+                
+            if x < 0 or x >= dc.width or y < 0 or y >= dc.height:
+                errors.append(f"Row {idx} (Rack {name}): Coordinates ({x}, {y}) are out of datacenter bounds (Width: {dc.width}, Height: {dc.height}).")
+                continue
+                
+            if (x, y) in imported_coords:
+                errors.append(f"Row {idx} (Rack {name}): Coordinate collision ({x}, {y}) with another rack inside the import file.")
+                continue
+                
+            coord_conflict_rack = existing_coords.get((x, y))
+            if coord_conflict_rack and coord_conflict_rack.lower() != name.lower():
+                errors.append(f"Row {idx} (Rack {name}): Coordinate collision ({x}, {y}) with existing rack '{coord_conflict_rack}' in the database.")
+                continue
+                
+            imported_coords.add((x, y))
+            proposed_racks.add(name.lower())
+            
+            status = "new"
+            if name.lower() in existing_racks:
+                status = "update"
+                
+            parsed_racks.append({
+                "row": idx,
+                "name": name,
+                "x_coord": x,
+                "y_coord": y,
+                "height_u": height,
+                "status": status
+            })
+
+    # Phase 2: Parse Devices
+    for idx, row in enumerate(rows[1:], start=2):
+        if not row or not any(row):
+            continue
+        row_type = get_val(row, ["type"], "device").lower()
+        if row_type == "device":
+            name = get_val(row, ["name", "device name", "device_name"])
+            if not name:
+                errors.append(f"Row {idx}: Device is missing a Name.")
+                continue
+                
+            rack_name = get_val(row, ["rack", "parent", "parent rack", "rack name", "rack_name"])
+            if not rack_name:
+                errors.append(f"Row {idx} (Device {name}): Missing associated Rack Name.")
+                continue
+                
+            target_rack = existing_racks.get(rack_name.lower())
+            is_rack_proposed = rack_name.lower() in proposed_racks
+            
+            if not target_rack and not is_rack_proposed:
+                errors.append(f"Row {idx} (Device {name}): Target rack '{rack_name}' does not exist in the datacenter and is not being created in this import file.")
+                continue
+                
+            start_u_str = get_val(row, ["start u", "start_u", "start position", "u position"])
+            u_height_str = get_val(row, ["height", "u height", "height u", "height_u", "height (u)", "slots"], "1")
+            
+            if not start_u_str:
+                errors.append(f"Row {idx} (Device {name}): Missing starting U slot position ('Start U').")
+                continue
+                
+            try:
+                start_u = int(start_u_str)
+                u_height = int(u_height_str)
+            except ValueError:
+                errors.append(f"Row {idx} (Device {name}): Start U and Height must be integers (got '{start_u_str}', '{u_height_str}').")
+                continue
+                
+            max_height_u = target_rack.height_u if target_rack else 42
+            for pr in parsed_racks:
+                if pr["name"].lower() == rack_name.lower():
+                    max_height_u = pr["height_u"]
+                    break
+                    
+            if start_u < 1 or start_u + u_height - 1 > max_height_u:
+                errors.append(f"Row {idx} (Device {name}): U slots ({start_u} to {start_u + u_height - 1}) are out of bounds for rack '{rack_name}' (capacity: {max_height_u}U).")
+                continue
+                
+            device_type = get_val(row, ["device type", "device_type", "type of device"], "Server")
+            ip_addresses = get_val(row, ["ip addresses", "ip_addresses", "ip", "ips", "ip address"], "")
+            management_ip = get_val(row, ["management ip", "management_ip", "mgt ip", "oob ip"], "")
+            management_link = get_val(row, ["management link", "management_link", "mgt link", "oob link"], "")
+            owner = get_val(row, ["owner"], "")
+            network_ports = get_val(row, ["network ports", "network_ports", "ports"], "")
+            description = get_val(row, ["description", "desc", "notes"], "")
+            
+            custom_values = {}
+            active_fields = session.exec(select(DeviceField).where(DeviceField.is_active == True)).all()
+            for f in active_fields:
+                if f.is_custom:
+                    val = get_val(row, [f.label.lower(), f.name.lower()])
+                    if val is not None:
+                        custom_values[f.name] = val
+                        
+            parsed_devices.append({
+                "row": idx,
+                "name": name,
+                "device_type": device_type,
+                "rack_name": rack_name,
+                "start_u": start_u,
+                "u_height": u_height,
+                "ip_addresses": ip_addresses,
+                "management_ip": management_ip,
+                "management_link": management_link,
+                "owner": owner,
+                "network_ports": network_ports,
+                "description": description,
+                "custom_values": custom_values
+            })
+            
+    rack_device_reservations = {}
+    for rack in dc.racks:
+        rack_device_reservations[rack.name.lower()] = [
+            (d.start_u, d.start_u + d.u_height - 1, d.name)
+            for d in rack.devices if d.deleted_at is None
+        ]
+        
+    for d in parsed_devices:
+        r_name = d["rack_name"].lower()
+        if r_name not in rack_device_reservations:
+            rack_device_reservations[r_name] = []
+            
+        d_start = d["start_u"]
+        d_end = d["start_u"] + d["u_height"] - 1
+        
+        overlap_found = False
+        for (start, end, occupant_name) in rack_device_reservations[r_name]:
+            if not (d_end < start or d_start > end):
+                errors.append(f"Row {d['row']} (Device {d['name']}): U slot conflict ({d_start}U-{d_end}U) on rack '{d['rack_name']}' which is already occupied by '{occupant_name}'.")
+                overlap_found = True
+                break
+                
+        if not overlap_found:
+            rack_device_reservations[r_name].append((d_start, d_end, d["name"]))
+
+    valid = len(errors) == 0
+    return {
+        "valid": valid,
+        "errors": errors,
+        "racks": parsed_racks,
+        "devices": parsed_devices
+    }
+
+@app.post("/datacenters/{dc_id}/import/commit")
+def commit_import(dc_id: int, payload: dict, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    dc = session.get(Datacenter, dc_id)
+    if not dc:
+        raise HTTPException(status_code=404, detail="Datacenter not found")
+        
+    racks_data = payload.get("racks", [])
+    devices_data = payload.get("devices", [])
+    
+    rack_name_to_obj = {r.name.lower(): r for r in dc.racks}
+    
+    for r_data in racks_data:
+        name = r_data["name"]
+        name_lower = name.lower()
+        
+        if name_lower in rack_name_to_obj:
+            rack = rack_name_to_obj[name_lower]
+            rack.x_coord = r_data["x_coord"]
+            rack.y_coord = r_data["y_coord"]
+            rack.height_u = r_data["height_u"]
+            session.add(rack)
+        else:
+            new_rack = Rack(
+                name=name,
+                datacenter_id=dc_id,
+                x_coord=r_data["x_coord"],
+                y_coord=r_data["y_coord"],
+                height_u=r_data["height_u"]
+            )
+            session.add(new_rack)
+            session.commit()
+            session.refresh(new_rack)
+            rack_name_to_obj[name_lower] = new_rack
+            
+    session.commit()
+    rack_name_to_obj = {r.name.lower(): r for r in session.get(Datacenter, dc_id).racks}
+    
+    for d_data in devices_data:
+        rack_name = d_data["rack_name"]
+        rack = rack_name_to_obj.get(rack_name.lower())
+        if not rack:
+            raise HTTPException(status_code=400, detail=f"Rack '{rack_name}' not found for device '{d_data['name']}'")
+            
+        new_device = Device(
+            name=d_data["name"],
+            device_type=d_data["device_type"],
+            rack_id=rack.id,
+            start_u=d_data["start_u"],
+            u_height=d_data["u_height"],
+            ip_addresses=d_data.get("ip_addresses"),
+            management_ip=d_data.get("management_ip"),
+            management_link=d_data.get("management_link"),
+            owner=d_data.get("owner"),
+            network_ports=d_data.get("network_ports"),
+            description=d_data.get("description"),
+            custom_values=d_data.get("custom_values", {}),
+            status="Unknown"
+        )
+        session.add(new_device)
+        
+    session.commit()
+    return {"success": True, "racks_count": len(racks_data), "devices_count": len(devices_data)}
 
 @app.get("/datacenters/{dc_id}/export")
 def export_datacenter_csv(dc_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):

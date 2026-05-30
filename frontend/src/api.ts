@@ -66,6 +66,20 @@ export const downloadDatacenterExport = (dcId: number, dcName: string) => {
     });
 };
 
+export const analyzeImport = (dcId: number, file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post(`/datacenters/${dcId}/import/analyze`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  }).then((res: any) => res.data);
+};
+
+export const commitImport = (dcId: number, payload: { racks: any[]; devices: any[] }) => {
+  return api.post(`/datacenters/${dcId}/import/commit`, payload).then((res: any) => res.data);
+};
+
 // Racks
 export const getRack = (id: number) => api.get<RackWithDevices>(`/racks/${id}`).then((res: any) => res.data);
 export const getRacks = () => api.get<Rack[]>('/racks/').then((res: any) => res.data);
