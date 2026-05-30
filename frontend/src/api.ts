@@ -78,6 +78,7 @@ export const createDevice = (device: any) => api.post<Device>('/devices/', devic
 export const updateDevice = (id: number, device: Partial<Device>) => api.patch<Device>(`/devices/${id}`, device).then((res: any) => res.data);
 export const deleteDevice = (id: number) => api.delete(`/devices/${id}`).then((res: any) => res.data);
 export const getDeviceHistory = (deviceId: number) => api.get<StatusHistory[]>(`/devices/${deviceId}/history`).then((res: any) => res.data);
+export const pingDevice = (deviceId: number) => api.get<{ success: boolean; ip: string; output: string; status: string; timestamp: string }>(`/devices/${deviceId}/ping`).then((res: any) => res.data);
 
 // Config
 export const getConfig = () => api.get<SystemConfig>('/config/').then((res: any) => res.data);

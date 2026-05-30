@@ -602,6 +602,55 @@ def read_device_history(device_id: int, session: Session = Depends(get_session),
     history = session.exec(statement).all()
     return history
 
+@app.get("/devices/{device_id}/ping")
+async def ping_device_endpoint(device_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
+    device = session.get(Device, device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    if not device.ip_addresses:
+        raise HTTPException(status_code=400, detail="Device does not have any configured IP address")
+    
+    primary_ip = device.ip_addresses.split(',')[0].strip()
+    if not primary_ip:
+        raise HTTPException(status_code=400, detail="Device IP address list is empty")
+         
+    command = ["ping", "-c", "4", "-W", "2", primary_ip]
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+        output = stdout.decode('utf-8', errors='ignore') + stderr.decode('utf-8', errors='ignore')
+        is_online = process.returncode == 0
+        
+        new_status = "Online" if is_online else "Offline"
+        device.status = new_status
+        device.last_checked = datetime.utcnow()
+        session.add(device)
+        
+        history = StatusHistory(device_id=device.id, status=new_status)
+        session.add(history)
+        session.commit()
+        
+        return {
+            "success": is_online,
+            "ip": primary_ip,
+            "output": output,
+            "status": new_status,
+            "timestamp": device.last_checked.isoformat()
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "ip": primary_ip,
+            "output": f"Failed to execute ping diagnostic: {str(e)}",
+            "status": "Unknown",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
 @app.delete("/devices/{device_id}")
 def delete_device(device_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     device = session.get(Device, device_id)

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getRack, createDevice, updateDevice, deleteDevice, getDatacenters, getRacks, getDeviceHistory, getDeviceFields } from '../api';
+import { getRack, createDevice, updateDevice, deleteDevice, getDatacenters, getRacks, getDeviceHistory, getDeviceFields, pingDevice } from '../api';
 import type { RackWithDevices, Device, Datacenter, Rack, StatusHistory, DeviceField } from '../types';
-import { ChevronLeft, Plus, ExternalLink, Activity, Trash2, Move, Edit2, Clock } from 'lucide-react';
+import { ChevronLeft, Plus, ExternalLink, Activity, Trash2, Move, Edit2, Clock, Terminal } from 'lucide-react';
 import Modal from './Modal';
 import { useAuth } from '../context/AuthContext';
 
@@ -41,6 +41,9 @@ const RackView: React.FC = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState(false);
+  const [diagnosticsOutput, setDiagnosticsOutput] = useState<string>('');
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [historyData, setHistoryData] = useState<StatusHistory[]>([]);
@@ -136,8 +139,35 @@ const RackView: React.FC = () => {
     setIsEditModalOpen(false);
     setIsMoveModalOpen(false);
     setIsHistoryModalOpen(false);
+    setIsDiagnosticsModalOpen(false);
     setTargetRack(null);
     setError(null);
+  };
+
+  const openDiagnosticsModal = (device: Device) => {
+    setSelectedDevice(device);
+    setDiagnosticsOutput('');
+    setDiagnosticsLoading(false);
+    setError(null);
+    setIsDiagnosticsModalOpen(true);
+  };
+
+  const runPingCheck = () => {
+    if (!selectedDevice) return;
+    setDiagnosticsLoading(true);
+    setDiagnosticsOutput('');
+    pingDevice(selectedDevice.id)
+      .then(res => {
+        setDiagnosticsOutput(res.output);
+        fetchRack();
+      })
+      .catch(err => {
+        const msg = err.response?.data?.detail || err.message || "Failed to execute diagnostic check.";
+        setDiagnosticsOutput(`❌ Error: ${msg}`);
+      })
+      .finally(() => {
+        setDiagnosticsLoading(false);
+      });
   };
 
   const handleDelete = (deviceId: number) => {
@@ -559,6 +589,15 @@ const RackView: React.FC = () => {
                         >
                           <Clock size={16} />
                         </button>
+                        {device.ip_addresses && (
+                          <button 
+                            onClick={() => openDiagnosticsModal(device)}
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            title="Interactive Ping Diagnostics"
+                          >
+                            <Terminal size={16} />
+                          </button>
+                        )}
                         {isAdmin && (
                           <>
                             <button 
@@ -871,6 +910,59 @@ const RackView: React.FC = () => {
         </div>
         <div className="mt-6 pt-4 border-t text-[10px] text-slate-400 italic">
           Showing data for the last 24 hours. Older records are automatically pruned.
+        </div>
+      </Modal>
+
+      <Modal isOpen={isDiagnosticsModalOpen} onClose={clearModals} title={`Interactive Diagnostics: ${selectedDevice?.name}`}>
+        <div className="space-y-4">
+          <p className="text-xs text-slate-600">
+            Send real-time ICMP packets directly from the host datacenter server to diagnose hardware connectivity.
+          </p>
+          
+          <div className="bg-slate-950 text-slate-200 font-mono p-4 rounded-lg h-64 overflow-y-auto border border-slate-800 text-xs shadow-inner select-text">
+            {diagnosticsLoading ? (
+              <div className="space-y-2">
+                <span className="text-blue-400 block animate-pulse">
+                  $ ping -c 4 {selectedDevice?.ip_addresses?.split(',')[0].trim()}
+                </span>
+                <div className="flex items-center gap-2 text-slate-400 italic">
+                  <span className="animate-spin border-2 border-current border-t-transparent rounded-full w-3.5 h-3.5 animate-pulse" />
+                  <span>Transmitting ICMP packets and awaiting reply...</span>
+                </div>
+              </div>
+            ) : diagnosticsOutput ? (
+              <div className="space-y-2">
+                <span className="text-slate-400 block">
+                  $ ping -c 4 {selectedDevice?.ip_addresses?.split(',')[0].trim()}
+                </span>
+                <pre className="whitespace-pre-wrap font-mono text-emerald-400 bg-slate-950 p-0 border-0">{diagnosticsOutput}</pre>
+              </div>
+            ) : (
+              <div className="text-slate-500 italic flex flex-col items-center justify-center h-full gap-2 py-10">
+                <Terminal size={32} className="text-slate-700 animate-bounce" />
+                <span>Diagnostics terminal idle. Configured IP: {selectedDevice?.ip_addresses?.split(',')[0].trim() || 'None'}</span>
+              </div>
+            )}
+          </div>
+          
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={clearModals}
+              className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 rounded font-semibold transition-colors"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              disabled={diagnosticsLoading || !selectedDevice?.ip_addresses}
+              onClick={runPingCheck}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow"
+            >
+              <Terminal size={16} />
+              <span>{diagnosticsLoading ? 'Pinging...' : 'Execute Ping'}</span>
+            </button>
+          </div>
         </div>
       </Modal>
     </div>
