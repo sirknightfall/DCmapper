@@ -30,6 +30,10 @@ const RackView: React.FC = () => {
     startU: 1
   });
   
+  // Target Rack Preview state
+  const [targetRack, setTargetRack] = useState<RackWithDevices | null>(null);
+  const [targetRackLoading, setTargetRackLoading] = useState(false);
+  
   const [newDevice, setNewDevice] = useState({
     name: '',
     description: '',
@@ -78,6 +82,21 @@ const RackView: React.FC = () => {
     });
   };
 
+  const fetchTargetRack = (rackId: number) => {
+    if (rackId > 0) {
+      setTargetRackLoading(true);
+      getRack(rackId)
+        .then(setTargetRack)
+        .catch(err => {
+          console.error("Failed to fetch target rack:", err);
+          setTargetRack(null);
+        })
+        .finally(() => setTargetRackLoading(false));
+    } else {
+      setTargetRack(null);
+    }
+  };
+
   useEffect(() => {
     fetchRack();
   }, [id]);
@@ -87,6 +106,7 @@ const RackView: React.FC = () => {
     setIsEditModalOpen(false);
     setIsMoveModalOpen(false);
     setIsHistoryModalOpen(false);
+    setTargetRack(null);
     setError(null);
   };
 
@@ -102,12 +122,15 @@ const RackView: React.FC = () => {
 
   const openMoveModal = (device: Device) => {
     setSelectedDevice(device);
+    const initialDcId = rack?.datacenter_id || 0;
+    const initialRackId = device.rack_id;
     setMoveData({
-      dcId: rack?.datacenter_id || 0,
-      rackId: device.rack_id,
+      dcId: initialDcId,
+      rackId: initialRackId,
       startU: device.start_u
     });
     fetchMoveResources();
+    fetchTargetRack(initialRackId);
     setError(null);
     setIsMoveModalOpen(true);
   };
@@ -526,65 +549,149 @@ const RackView: React.FC = () => {
         </form>
       </Modal>
 
-      <Modal isOpen={isMoveModalOpen} onClose={clearModals} title="Move Device">
-        <form onSubmit={handleMove} className="space-y-4">
-          {error && <div className="bg-red-50 text-red-600 p-2 rounded text-xs border border-red-200 mb-2">{error}</div>}
-          <p className="text-sm text-slate-600 mb-4">
-            Relocate <strong>{selectedDevice?.name}</strong> to a different rack or U position.
-          </p>
-          
-          <div>
-            <label className="block text-sm font-medium mb-1">Target Datacenter</label>
-            <select 
-              className="w-full border rounded px-3 py-2" 
-              value={moveData.dcId} 
-              onChange={e => {
-                const newDcId = parseInt(e.target.value);
-                const firstRackInDc = allRacks.find(r => r.datacenter_id === newDcId);
-                setMoveData({
-                  ...moveData, 
-                  dcId: newDcId,
-                  rackId: firstRackInDc ? firstRackInDc.id : 0
-                });
-              }}
-            >
-              {allDCs.map(dc => (
-                <option key={dc.id} value={dc.id}>{dc.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Target Rack</label>
-            <select 
-              className="w-full border rounded px-3 py-2" 
-              value={moveData.rackId} 
-              onChange={e => setMoveData({...moveData, rackId: parseInt(e.target.value)})}
-            >
-              {allRacks.filter(r => r.datacenter_id === moveData.dcId).map(r => (
-                <option key={r.id} value={r.id}>{r.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Start U Position</label>
-            <input 
-              type="number" 
-              required 
-              className="w-full border rounded px-3 py-2" 
-              value={moveData.startU} 
-              onChange={e => setMoveData({...moveData, startU: parseInt(e.target.value)})} 
-            />
-            <p className="text-[10px] text-slate-400 mt-1">
-              Device height: {selectedDevice?.u_height}U
+      <Modal isOpen={isMoveModalOpen} onClose={clearModals} title="Move Device" size="3xl">
+        <div className="flex flex-col md:flex-row gap-6">
+          <form onSubmit={handleMove} className="flex-1 space-y-4">
+            {error && <div className="bg-red-50 text-red-600 p-2 rounded text-xs border border-red-200 mb-2">{error}</div>}
+            <p className="text-sm text-slate-600 mb-4">
+              Relocate <strong>{selectedDevice?.name}</strong> to a different rack or U position.
             </p>
-          </div>
+            
+            <div>
+              <label className="block text-sm font-medium mb-1">Target Datacenter</label>
+              <select 
+                className="w-full border rounded px-3 py-2" 
+                value={moveData.dcId} 
+                onChange={e => {
+                  const newDcId = parseInt(e.target.value);
+                  const firstRackInDc = allRacks.find(r => r.datacenter_id === newDcId);
+                  const firstRackId = firstRackInDc ? firstRackInDc.id : 0;
+                  setMoveData({
+                    ...moveData, 
+                    dcId: newDcId,
+                    rackId: firstRackId
+                  });
+                  fetchTargetRack(firstRackId);
+                }}
+              >
+                {allDCs.map(dc => (
+                  <option key={dc.id} value={dc.id}>{dc.name}</option>
+                ))}
+              </select>
+            </div>
 
-          <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">
-            Confirm Move
-          </button>
-        </form>
+            <div>
+              <label className="block text-sm font-medium mb-1">Target Rack</label>
+              <select 
+                className="w-full border rounded px-3 py-2" 
+                value={moveData.rackId} 
+                onChange={e => {
+                  const newRackId = parseInt(e.target.value);
+                  setMoveData({...moveData, rackId: newRackId});
+                  fetchTargetRack(newRackId);
+                }}
+              >
+                {allRacks.filter(r => r.datacenter_id === moveData.dcId).map(r => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Start U Position</label>
+              <input 
+                type="number" 
+                required 
+                className="w-full border rounded px-3 py-2" 
+                value={moveData.startU} 
+                onChange={e => setMoveData({...moveData, startU: parseInt(e.target.value)})} 
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Device height: {selectedDevice?.u_height}U
+              </p>
+            </div>
+
+            <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">
+              Confirm Move
+            </button>
+          </form>
+
+          {/* Right Panel: Target Rack Preview */}
+          <div className="flex-1 flex flex-col">
+            {targetRackLoading ? (
+              <div className="flex items-center justify-center flex-1 h-[300px] border border-dashed rounded text-xs text-slate-400">
+                Loading target rack layout...
+              </div>
+            ) : targetRack ? (
+              <div className="flex-1 border border-slate-700 bg-slate-950 p-3 rounded-lg flex flex-col max-h-[400px] overflow-hidden">
+                <div className="text-xs font-bold text-slate-300 mb-2 border-b border-slate-800 pb-1 flex justify-between items-center">
+                  <span>Target Rack: {targetRack.name}</span>
+                  <span className="text-[10px] text-slate-500">{targetRack.height_u}U capacity</span>
+                </div>
+                
+                {/* Visual grid layout list */}
+                <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-0.5 min-h-0">
+                  {Array.from({ length: targetRack.height_u }, (_, i) => targetRack.height_u - i).map(u => {
+                    const isProposed = selectedDevice && u >= moveData.startU && u < moveData.startU + selectedDevice.u_height;
+                    const occupyingDevice = targetRack.devices.find(d => d.id !== selectedDevice?.id && u >= d.start_u && u < d.start_u + d.u_height);
+                    const isCollision = isProposed && occupyingDevice;
+                    const isOutOfBounds = selectedDevice && (moveData.startU < 1 || moveData.startU + selectedDevice.u_height - 1 > targetRack.height_u);
+                    
+                    let bgClass = "bg-slate-900 border-slate-800 text-slate-600 border border-dashed";
+                    let content = "Empty Slot";
+                    
+                    if (isCollision) {
+                      bgClass = "bg-red-950/80 border-red-500 text-red-200 border-2 font-bold animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.5)]";
+                      content = `⚠️ Overlap: ${occupyingDevice.name}`;
+                    } else if (isProposed) {
+                      if (isOutOfBounds) {
+                        bgClass = "bg-red-950/80 border-red-500 text-red-200 border-2 font-bold";
+                        content = `⚠️ Out of bounds (Exceeds ${targetRack.height_u}U)`;
+                      } else {
+                        bgClass = "bg-blue-950/80 border-blue-500 text-blue-100 border-2 font-semibold shadow-[0_0_5px_rgba(59,130,246,0.5)]";
+                        content = `✨ Moving: ${selectedDevice.name}`;
+                      }
+                    } else if (occupyingDevice) {
+                      bgClass = "bg-slate-700 border-slate-500 text-slate-100 border font-medium";
+                      content = occupyingDevice.name;
+                    }
+                    
+                    return (
+                      <div key={u} className={`flex items-center px-2 py-0.5 rounded text-[10px] font-mono h-6 transition-all ${bgClass}`}>
+                        <span className="w-5 text-right text-[9px] text-slate-500 mr-2 pr-1 border-r border-slate-800">{u}</span>
+                        <span className="truncate flex-1">{content}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Legend Guide */}
+                <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-slate-800 text-[9px]">
+                  <div className="flex items-center gap-1 text-blue-400">
+                    <span className="w-2.5 h-2.5 bg-blue-950 border border-blue-500 rounded-sm" />
+                    <span>✨ Proposed Position</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-red-400">
+                    <span className="w-2.5 h-2.5 bg-red-950 border border-red-500 rounded-sm" />
+                    <span>⚠️ Slot Conflict / Error</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-slate-200">
+                    <span className="w-2.5 h-2.5 bg-slate-700 border border-slate-500 rounded-sm" />
+                    <span>Housed Device</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-slate-500">
+                    <span className="w-2.5 h-2.5 bg-slate-900 border border-slate-800 border-dashed rounded-sm" />
+                    <span>Empty Slot</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center flex-1 h-[300px] border border-dashed rounded text-xs text-slate-400">
+                Select a target rack to view its layout
+              </div>
+            )}
+          </div>
+        </div>
       </Modal>
 
       <Modal isOpen={isHistoryModalOpen} onClose={clearModals} title={`Status History: ${selectedDevice?.name}`}>
