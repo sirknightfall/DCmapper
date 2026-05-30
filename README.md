@@ -100,6 +100,10 @@ All requests to the backend APIs require token-based authentication using an **O
 | | `DELETE` | `/devices/{device_id}` | Admin | Soft-delete equipment (sent to archives) |
 | **Config** | `GET` | `/config/` | Viewer / Admin | Get background loop interval / retention |
 | | `PATCH` | `/config/` | Admin | Edit background timings / retention days |
+| **Device Fields** | `GET` | `/device-fields/` | Viewer / Admin | List all device attributes/fields configuration |
+| | `POST` | `/device-fields/` | Admin | Create a completely new custom field |
+| | `PATCH` | `/device-fields/{field_id}` | Admin | Update field label, type, required status, or toggle active/inactive |
+| | `DELETE` | `/device-fields/{field_id}` | Admin | Delete custom field (or deactivate built-in field) |
 
 ---
 
