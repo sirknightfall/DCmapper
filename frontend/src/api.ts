@@ -103,4 +103,5 @@ export const getDeviceFields = () => api.get<DeviceField[]>('/device-fields/').t
 export const createDeviceField = (field: Omit<DeviceField, 'id' | 'name' | 'is_custom' | 'is_active'>) => api.post<DeviceField>('/device-fields/', field).then((res: any) => res.data);
 export const updateDeviceField = (id: number, field: Partial<DeviceField>) => api.patch<DeviceField>(`/device-fields/${id}`, field).then((res: any) => res.data);
 export const deleteDeviceField = (id: number) => api.delete(`/device-fields/${id}`).then((res: any) => res.data);
+export const getActivityLogs = () => api.get<any[]>('/activity-logs/').then((res: any) => res.data);
 

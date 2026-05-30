@@ -9,7 +9,7 @@ import csv
 import io
 from sqlmodel import Session, select, text
 from app.database import create_db_and_tables, get_session, engine
-from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory, User, DeviceField
+from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory, User, DeviceField, ActivityLog
 from app.schemas import (
     DatacenterCreate, DatacenterRead, DatacenterWithRacks, DatacenterWithRacksAndDevices, DatacenterUpdate,
     RackCreate, RackRead, RackWithDevices, RackUpdate,
@@ -17,7 +17,7 @@ from app.schemas import (
     SystemConfigRead, SystemConfigUpdate,
     StatusHistoryRead,
     UserRead, UserCreate, UserUpdatePassword, Token,
-    DeviceFieldCreate, DeviceFieldUpdate
+    DeviceFieldCreate, DeviceFieldUpdate, ActivityLogRead
 )
 from app.tasks import status_monitor_task, cleanup_deleted_devices_task
 from app.auth import (
@@ -179,6 +179,7 @@ async def read_users_me(current_user: User = Depends(get_current_active_user)):
 async def update_own_password(update: UserUpdatePassword, session: Session = Depends(get_session), current_user: User = Depends(get_current_active_user)):
     current_user.hashed_password = get_password_hash(update.new_password)
     session.add(current_user)
+    log_activity(session, current_user.username, "Change Password", "Changed own password")
     session.commit()
     session.refresh(current_user)
     return current_user
@@ -189,7 +190,7 @@ async def read_users(session: Session = Depends(get_session), _: User = Depends(
     return users
 
 @app.post("/users/", response_model=UserRead)
-async def create_user(user: UserCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+async def create_user(user: UserCreate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     # Check if exists
     existing = session.exec(select(User).where(User.username == user.username)).first()
     if existing:
@@ -201,18 +202,20 @@ async def create_user(user: UserCreate, session: Session = Depends(get_session),
         role=user.role
     )
     session.add(db_user)
+    log_activity(session, current_user.username, "Create User", f"Created user {db_user.username} with role {db_user.role}")
     session.commit()
     session.refresh(db_user)
     return db_user
 
 @app.patch("/users/{user_id}/password", response_model=UserRead)
-async def reset_user_password(user_id: int, update: UserUpdatePassword, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+async def reset_user_password(user_id: int, update: UserUpdatePassword, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     db_user = session.get(User, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
     
     db_user.hashed_password = get_password_hash(update.new_password)
     session.add(db_user)
+    log_activity(session, current_user.username, "Reset Password", f"Reset password for user {db_user.username}")
     session.commit()
     session.refresh(db_user)
     return db_user
@@ -226,6 +229,7 @@ async def delete_user(user_id: int, session: Session = Depends(get_session), cur
     if db_user.username == current_user.username:
         raise HTTPException(status_code=400, detail="Cannot delete your own user")
     
+    log_activity(session, current_user.username, "Delete User", f"Deleted user {db_user.username}")
     session.delete(db_user)
     session.commit()
     return {"ok": True}
@@ -233,9 +237,10 @@ async def delete_user(user_id: int, session: Session = Depends(get_session), cur
 # --- Datacenter Routes ---
 
 @app.post("/datacenters/", response_model=DatacenterRead)
-def create_datacenter(dc: DatacenterCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def create_datacenter(dc: DatacenterCreate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     db_dc = Datacenter.from_orm(dc)
     session.add(db_dc)
+    log_activity(session, current_user.username, "Create Datacenter", f"Created datacenter {db_dc.name} ({db_dc.address})")
     session.commit()
     session.refresh(db_dc)
     return db_dc
@@ -259,7 +264,7 @@ def read_datacenter(dc_id: int, session: Session = Depends(get_session), _: User
     return dc
 
 @app.patch("/datacenters/{dc_id}", response_model=DatacenterRead)
-def update_datacenter(dc_id: int, dc_update: DatacenterUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def update_datacenter(dc_id: int, dc_update: DatacenterUpdate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     db_dc = session.get(Datacenter, dc_id)
     if not db_dc:
         raise HTTPException(status_code=404, detail="Datacenter not found")
@@ -285,12 +290,13 @@ def update_datacenter(dc_id: int, dc_update: DatacenterUpdate, session: Session 
         setattr(db_dc, key, value)
     
     session.add(db_dc)
+    log_activity(session, current_user.username, "Update Datacenter", f"Updated datacenter {db_dc.name}")
     session.commit()
     session.refresh(db_dc)
     return db_dc
 
 @app.delete("/datacenters/{dc_id}")
-def delete_datacenter(dc_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def delete_datacenter(dc_id: int, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     dc = session.get(Datacenter, dc_id)
     if not dc:
         raise HTTPException(status_code=404, detail="Datacenter not found")
@@ -302,6 +308,7 @@ def delete_datacenter(dc_id: int, session: Session = Depends(get_session), _: Us
             session.delete(device)
         session.delete(rack)
     
+    log_activity(session, current_user.username, "Delete Datacenter", f"Deleted datacenter {dc.name}")
     session.delete(dc)
     session.commit()
     return {"ok": True}
@@ -514,7 +521,7 @@ async def analyze_import(dc_id: int, file: UploadFile = File(...), session: Sess
     }
 
 @app.post("/datacenters/{dc_id}/import/commit")
-def commit_import(dc_id: int, payload: dict, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def commit_import(dc_id: int, payload: dict, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     dc = session.get(Datacenter, dc_id)
     if not dc:
         raise HTTPException(status_code=404, detail="Datacenter not found")
@@ -573,6 +580,7 @@ def commit_import(dc_id: int, payload: dict, session: Session = Depends(get_sess
         )
         session.add(new_device)
         
+    log_activity(session, current_user.username, "Bulk Import", f"Imported {len(racks_data)} racks and {len(devices_data)} devices in datacenter {dc.name}")
     session.commit()
     return {"success": True, "racks_count": len(racks_data), "devices_count": len(devices_data)}
 
@@ -649,9 +657,10 @@ def export_datacenter_csv(dc_id: int, session: Session = Depends(get_session), _
 # --- Rack Routes ---
 
 @app.post("/racks/", response_model=RackRead)
-def create_rack(rack: RackCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def create_rack(rack: RackCreate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     db_rack = Rack.from_orm(rack)
     session.add(db_rack)
+    log_activity(session, current_user.username, "Create Rack", f"Placed rack {db_rack.name} on coordinates ({db_rack.x_coord}, {db_rack.y_coord})")
     session.commit()
     session.refresh(db_rack)
     return db_rack
@@ -671,7 +680,7 @@ def read_rack(rack_id: int, session: Session = Depends(get_session), _: User = D
     return rack
 
 @app.patch("/racks/{rack_id}", response_model=RackRead)
-def update_rack(rack_id: int, rack_update: RackUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def update_rack(rack_id: int, rack_update: RackUpdate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     db_rack = session.get(Rack, rack_id)
     if not db_rack:
         raise HTTPException(status_code=404, detail="Rack not found")
@@ -693,7 +702,7 @@ def update_rack(rack_id: int, rack_update: RackUpdate, session: Session = Depend
         existing_rack = session.exec(statement).first()
         if existing_rack:
             raise HTTPException(status_code=400, detail=f"A rack named '{existing_rack.name}' already exists at {new_x},{new_y}")
-
+ 
     rack_data = rack_update.dict(exclude_unset=True)
     
     # Validation: Ensure resizing doesn't orphan devices
@@ -710,17 +719,18 @@ def update_rack(rack_id: int, rack_update: RackUpdate, session: Session = Depend
                 status_code=400, 
                 detail=f"Cannot resize: Device '{offending_device.name}' reaches up to {top_u}U"
             )
-
+ 
     for key, value in rack_data.items():
         setattr(db_rack, key, value)
     
     session.add(db_rack)
+    log_activity(session, current_user.username, "Update Rack", f"Updated rack {db_rack.name}")
     session.commit()
     session.refresh(db_rack)
     return db_rack
 
 @app.delete("/racks/{rack_id}")
-def delete_rack(rack_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def delete_rack(rack_id: int, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     rack = session.get(Rack, rack_id)
     if not rack:
         raise HTTPException(status_code=404, detail="Rack not found")
@@ -729,6 +739,7 @@ def delete_rack(rack_id: int, session: Session = Depends(get_session), _: User =
     for device in rack.devices:
         session.delete(device)
         
+    log_activity(session, current_user.username, "Delete Rack", f"Deleted rack {rack.name}")
     session.delete(rack)
     session.commit()
     return {"ok": True}
@@ -804,7 +815,7 @@ def validate_device_fields(session: Session, device_data: dict, is_update: bool 
     device_data["custom_values"] = cleaned_custom_vals
 
 @app.post("/devices/", response_model=DeviceRead)
-def create_device(device: DeviceCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def create_device(device: DeviceCreate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     validate_device_placement(session, device.rack_id, device.start_u, device.u_height)
     
     # Validate and clean dynamic fields
@@ -814,6 +825,7 @@ def create_device(device: DeviceCreate, session: Session = Depends(get_session),
     # Create the device with the updated/cleaned dict
     db_device = Device(**device_dict)
     session.add(db_device)
+    log_activity(session, current_user.username, "Create Device", f"Added device {db_device.name} to rack U{db_device.start_u}")
     session.commit()
     session.refresh(db_device)
     return db_device
@@ -826,7 +838,7 @@ def read_device(device_id: int, session: Session = Depends(get_session), _: User
     return device
 
 @app.patch("/devices/{device_id}", response_model=DeviceRead)
-def update_device(device_id: int, device_update: DeviceUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def update_device(device_id: int, device_update: DeviceUpdate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     db_device = session.get(Device, device_id)
     if not db_device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -857,6 +869,7 @@ def update_device(device_id: int, device_update: DeviceUpdate, session: Session 
             setattr(db_device, key, value)
     
     session.add(db_device)
+    log_activity(session, current_user.username, "Update Device", f"Updated device {db_device.name}")
     session.commit()
     session.refresh(db_device)
     return db_device
@@ -922,13 +935,14 @@ async def ping_device_endpoint(device_id: int, session: Session = Depends(get_se
         }
 
 @app.delete("/devices/{device_id}")
-def delete_device(device_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def delete_device(device_id: int, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     device = session.get(Device, device_id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     # Soft delete
     device.deleted_at = datetime.utcnow()
     session.add(device)
+    log_activity(session, current_user.username, "Delete Device", f"Soft-deleted device {device.name}")
     session.commit()
     return {"ok": True}
 
@@ -946,7 +960,7 @@ def get_config(session: Session = Depends(get_session), _: User = Depends(get_cu
     return config
 
 @app.patch("/config/", response_model=SystemConfigRead)
-def update_config(config_update: SystemConfigUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def update_config(config_update: SystemConfigUpdate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     config = session.exec(select(SystemConfig)).first()
     if not config:
         config = SystemConfig()
@@ -957,9 +971,20 @@ def update_config(config_update: SystemConfigUpdate, session: Session = Depends(
         config.retention_days = config_update.retention_days
         
     session.add(config)
+    log_activity(session, current_user.username, "Update Config", f"Updated retention days to {config.retention_days}, check interval to {config.check_interval_seconds}s")
     session.commit()
     session.refresh(config)
     return config
+
+def log_activity(session: Session, username: str, action: str, details: str):
+    log = ActivityLog(username=username, action=action, details=details)
+    session.add(log)
+
+@app.get("/activity-logs/", response_model=List[ActivityLogRead])
+def read_activity_logs(offset: int = 0, limit: int = 500, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
+    statement = select(ActivityLog).order_by(ActivityLog.timestamp.desc()).offset(offset).limit(limit)
+    logs = session.exec(statement).all()
+    return logs
 
 # --- Device Field Config Routes ---
 
@@ -969,7 +994,7 @@ def read_device_fields(session: Session = Depends(get_session), _: User = Depend
     return fields
 
 @app.post("/device-fields/", response_model=DeviceField)
-def create_device_field(field: DeviceFieldCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def create_device_field(field: DeviceFieldCreate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     # Automatically generate a clean name/slug from the label
     name_slug = "".join(c for c in field.label.lower().replace(" ", "_") if c.isalnum() or c == "_")
     if not name_slug:
@@ -990,12 +1015,13 @@ def create_device_field(field: DeviceFieldCreate, session: Session = Depends(get
     )
     
     session.add(db_field)
+    log_activity(session, current_user.username, "Create Device Field", f"Created custom field: {db_field.label} ({db_field.field_type})")
     session.commit()
     session.refresh(db_field)
     return db_field
 
 @app.patch("/device-fields/{field_id}", response_model=DeviceField)
-def update_device_field(field_id: int, field_update: DeviceFieldUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def update_device_field(field_id: int, field_update: DeviceFieldUpdate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     db_field = session.get(DeviceField, field_id)
     if not db_field:
         raise HTTPException(status_code=404, detail="Device field not found")
@@ -1010,12 +1036,13 @@ def update_device_field(field_id: int, field_update: DeviceFieldUpdate, session:
         db_field.is_active = field_update.is_active
         
     session.add(db_field)
+    log_activity(session, current_user.username, "Update Device Field", f"Updated field: {db_field.label}")
     session.commit()
     session.refresh(db_field)
     return db_field
 
 @app.delete("/device-fields/{field_id}")
-def delete_device_field(field_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+def delete_device_field(field_id: int, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     db_field = session.get(DeviceField, field_id)
     if not db_field:
         raise HTTPException(status_code=404, detail="Device field not found")
@@ -1024,9 +1051,11 @@ def delete_device_field(field_id: int, session: Session = Depends(get_session), 
         # Built-in fields cannot be deleted from the schema, only deactivated/removed from view!
         db_field.is_active = False
         session.add(db_field)
+        log_activity(session, current_user.username, "Update Device Field", f"Deactivated built-in field: {db_field.label}")
         session.commit()
         return {"ok": True, "message": "Built-in field deactivated"}
     
+    log_activity(session, current_user.username, "Delete Device Field", f"Deleted custom field: {db_field.label}")
     session.delete(db_field)
     session.commit()
     return {"ok": True}

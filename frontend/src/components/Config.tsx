@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getConfig, updateConfig, updateOwnPassword, getDeviceFields, createDeviceField, updateDeviceField, deleteDeviceField } from '../api';
-import { Settings, Save, AlertCircle, CheckCircle, Database, Lock, Users, Key, Plus, Trash2 } from 'lucide-react';
+import { getConfig, updateConfig, updateOwnPassword, getDeviceFields, createDeviceField, updateDeviceField, deleteDeviceField, getActivityLogs } from '../api';
+import { Settings, Save, AlertCircle, CheckCircle, Database, Lock, Users, Plus, Trash2, ClipboardList } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { DeviceField } from '../types';
@@ -28,12 +28,23 @@ const Config: React.FC = () => {
   const [passMessage, setPassMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [isUpdatingPass, setIsUpdatingPass] = useState(false);
 
+  // Tabs & Audit Logs
+  const [activeTab, setActiveTab] = useState<'settings' | 'fields' | 'security' | 'logs'>('settings');
+  const [activityLogs, setActivityLogs] = useState<any[]>([]);
+
+  const fetchLogs = () => {
+    getActivityLogs()
+      .then(setActivityLogs)
+      .catch(err => console.error("Failed to fetch activity logs:", err));
+  };
+
   useEffect(() => {
-    Promise.all([getConfig(), getDeviceFields()])
-      .then(([configData, fieldsData]) => {
+    Promise.all([getConfig(), getDeviceFields(), getActivityLogs()])
+      .then(([configData, fieldsData, logsData]) => {
         setIntervalValue(configData.check_interval_seconds);
         setRetention(configData.retention_days);
         setDeviceFields(fieldsData);
+        setActivityLogs(logsData);
       })
       .catch(err => {
         console.error("Failed to fetch config or fields:", err);
@@ -43,8 +54,8 @@ const Config: React.FC = () => {
   }, []);
 
   const handleSaveConfig = (e: React.FormEvent) => {
-    e.preventDefault();
     if (!isAdmin) return;
+    e.preventDefault();
     
     setIsSubmitting(true);
     setMessage(null);
@@ -55,6 +66,7 @@ const Config: React.FC = () => {
     })
       .then(() => {
         setMessage({ text: "Settings saved successfully.", type: 'success' });
+        fetchLogs();
       })
       .catch(err => {
         console.error("Failed to update config:", err);
@@ -82,6 +94,7 @@ const Config: React.FC = () => {
       .then(() => {
         setPassMessage({ text: "Password updated successfully.", type: 'success' });
         setPasswordData({ new: '', confirm: '' });
+        fetchLogs();
       })
       .catch(err => {
         setPassMessage({ text: err.response?.data?.detail || "Failed to update password.", type: 'error' });
@@ -107,6 +120,7 @@ const Config: React.FC = () => {
         setNewFieldType('text');
         setNewFieldRequired(false);
         setFieldMessage({ text: "Custom field added successfully.", type: 'success' });
+        fetchLogs();
       })
       .catch(err => {
         console.error("Failed to create field:", err);
@@ -121,6 +135,7 @@ const Config: React.FC = () => {
     updateDeviceField(field.id, { is_active: newActive })
       .then(updated => {
         setDeviceFields(prev => prev.map(f => f.id === field.id ? updated : f));
+        fetchLogs();
       })
       .catch(err => {
         console.error("Failed to update active state:", err);
@@ -133,6 +148,7 @@ const Config: React.FC = () => {
     updateDeviceField(field.id, { required: newReq })
       .then(updated => {
         setDeviceFields(prev => prev.map(f => f.id === field.id ? updated : f));
+        fetchLogs();
       })
       .catch(err => {
         console.error("Failed to update required state:", err);
@@ -148,10 +164,10 @@ const Config: React.FC = () => {
         if (field.is_custom) {
           setDeviceFields(prev => prev.filter(f => f.id !== field.id));
         } else {
-          // Built-in fields get deactivated in database
           setDeviceFields(prev => prev.map(f => f.id === field.id ? { ...f, is_active: false } : f));
         }
         setFieldMessage({ text: `Field "${field.label}" removed successfully.`, type: 'success' });
+        fetchLogs();
       })
       .catch(err => {
         console.error("Failed to delete field:", err);
@@ -163,31 +179,81 @@ const Config: React.FC = () => {
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
-      <div>
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            <Settings size={28} className="text-slate-700" />
-            <h1 className="text-2xl font-bold">System Configuration</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            {isAdmin && (
-              <Link 
-                to="/users" 
-                className="flex items-center gap-1 bg-slate-100 text-slate-700 px-3 py-1 rounded-full text-xs font-bold border border-slate-200 hover:bg-slate-200 transition-colors"
-              >
-                <Users size={12} />
-                MANAGE USERS
-              </Link>
-            )}
-            {!isAdmin && (
-              <div className="flex items-center gap-1 text-amber-600 bg-amber-50 px-3 py-1 rounded-full text-xs font-bold border border-amber-200">
-                <Lock size={12} />
-                READ ONLY
-              </div>
-            )}
-          </div>
+      {/* Title & User Actions Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Settings size={28} className="text-slate-700" />
+          <h1 className="text-2xl font-bold">System Configuration</h1>
         </div>
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Link 
+              to="/users" 
+              className="flex items-center gap-1 bg-slate-100 text-slate-700 px-3 py-1 rounded-full text-xs font-bold border border-slate-200 hover:bg-slate-200 transition-colors"
+            >
+              <Users size={12} />
+              MANAGE USERS
+            </Link>
+          )}
+          {!isAdmin && (
+            <div className="flex items-center gap-1 text-amber-600 bg-amber-50 px-3 py-1 rounded-full text-xs font-bold border border-amber-200">
+              <Lock size={12} />
+              READ ONLY
+            </div>
+          )}
+        </div>
+      </div>
 
+      {/* Modern Glassmorphic Tab Navigation Bar */}
+      <div className="flex border-b border-slate-200 mb-6 gap-2">
+        <button
+          onClick={() => setActiveTab('settings')}
+          className={`py-2 px-4 text-sm font-semibold transition-all border-b-2 rounded-t-lg -mb-[2px] ${
+            activeTab === 'settings'
+              ? 'border-blue-600 text-blue-600 bg-blue-50/50'
+              : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          ⚙️ Settings
+        </button>
+        <button
+          onClick={() => setActiveTab('fields')}
+          className={`py-2 px-4 text-sm font-semibold transition-all border-b-2 rounded-t-lg -mb-[2px] ${
+            activeTab === 'fields'
+              ? 'border-blue-600 text-blue-600 bg-blue-50/50'
+              : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          📋 Fields Config
+        </button>
+        <button
+          onClick={() => setActiveTab('security')}
+          className={`py-2 px-4 text-sm font-semibold transition-all border-b-2 rounded-t-lg -mb-[2px] ${
+            activeTab === 'security'
+              ? 'border-blue-600 text-blue-600 bg-blue-50/50'
+              : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          🔑 Security
+        </button>
+        <button
+          onClick={() => {
+            fetchLogs();
+            setActiveTab('logs');
+          }}
+          className={`py-2 px-4 text-sm font-semibold transition-all border-b-2 rounded-t-lg -mb-[2px] flex items-center gap-1.5 ${
+            activeTab === 'logs'
+              ? 'border-blue-600 text-blue-600 bg-blue-50/50'
+              : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <ClipboardList size={16} />
+          <span>Audit Logs</span>
+        </button>
+      </div>
+
+      {/* Tab 1: System Settings */}
+      {activeTab === 'settings' && (
         <div className="bg-white border rounded-lg shadow-sm p-6">
           <form onSubmit={handleSaveConfig} className="space-y-8">
             {/* Status Check Section */}
@@ -269,17 +335,10 @@ const Config: React.FC = () => {
             )}
           </form>
         </div>
-      </div>
+      )}
 
-      {/* Server Fields Configuration */}
-      <div>
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            <Settings size={28} className="text-slate-700" />
-            <h1 className="text-2xl font-bold">Server Fields Configuration</h1>
-          </div>
-        </div>
-
+      {/* Tab 2: Fields Config */}
+      {activeTab === 'fields' && (
         <div className="bg-white border rounded-lg shadow-sm p-6 space-y-6">
           <div>
             <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-2">Configure Server Fields</h2>
@@ -418,15 +477,10 @@ const Config: React.FC = () => {
             </div>
           )}
         </div>
-      </div>
+      )}
 
-      {/* Self-service Password Change */}
-      <div>
-        <div className="flex items-center gap-2 mb-6">
-          <Key size={28} className="text-slate-700" />
-          <h1 className="text-2xl font-bold">Personal Security</h1>
-        </div>
-
+      {/* Tab 3: Personal Security */}
+      {activeTab === 'security' && (
         <div className="bg-white border rounded-lg shadow-sm p-6">
           <form onSubmit={handlePasswordChange} className="space-y-6">
             <section>
@@ -487,16 +541,60 @@ const Config: React.FC = () => {
             </div>
           </form>
         </div>
-      </div>
+      )}
 
-      <div className="mt-8 bg-slate-50 border border-dashed rounded-lg p-4">
-        <h3 className="text-sm font-bold text-slate-600 mb-2">Security Notice</h3>
-        <ul className="text-xs text-slate-500 space-y-1 list-disc pl-4">
-          <li>Passwords are stored securely using one-way cryptographic hashing.</li>
-          <li>For security reasons, your current session will remain active after changing your password.</li>
-          <li>If you forget your password, please contact a system administrator (Editor) to reset it.</li>
-        </ul>
-      </div>
+      {/* Tab 4: Audit Logs */}
+      {activeTab === 'logs' && (
+        <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+          <div className="p-4 bg-slate-50 border-b flex justify-between items-center text-xs text-slate-500 uppercase tracking-wider font-bold">
+            <span>Relational Activity Audit Trail</span>
+            <button
+              onClick={fetchLogs}
+              className="text-[10px] bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold px-2.5 py-1 rounded transition-all shadow-sm"
+            >
+              Refresh Logs
+            </button>
+          </div>
+
+          <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto pr-1">
+            {activityLogs.map((log: any) => (
+              <div key={log.id} className="p-4 hover:bg-slate-50 transition-colors flex justify-between items-start gap-4">
+                <div className="space-y-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                      @{log.username}
+                    </span>
+                    <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded uppercase">
+                      {log.action}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 break-words font-medium">{log.details}</p>
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono whitespace-nowrap shrink-0">
+                  {new Date(log.timestamp).toLocaleString()}
+                </span>
+              </div>
+            ))}
+            {activityLogs.length === 0 && (
+              <div className="py-20 text-center text-slate-500 bg-slate-50/50 border border-dashed m-4 rounded-lg text-sm">
+                No activity logs recorded yet.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Security Notices */}
+      {activeTab !== 'logs' && (
+        <div className="bg-slate-50 border border-dashed rounded-lg p-4">
+          <h3 className="text-sm font-bold text-slate-600 mb-2">Security Notice</h3>
+          <ul className="text-xs text-slate-500 space-y-1 list-disc pl-4">
+            <li>Passwords are stored securely using one-way cryptographic hashing.</li>
+            <li>For security reasons, your current session will remain active after changing your password.</li>
+            <li>If you forget your password, please contact a system administrator (Editor) to reset it.</li>
+          </ul>
+        </div>
+      )}
     </div>
   );
 };

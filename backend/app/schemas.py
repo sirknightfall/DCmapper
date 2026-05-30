@@ -148,3 +148,10 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     username: Optional[str] = None
     role: Optional[str] = None
+
+class ActivityLogRead(BaseModel):
+    id: int
+    username: str
+    action: str
+    details: str
+    timestamp: datetime

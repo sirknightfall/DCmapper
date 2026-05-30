@@ -87,4 +87,11 @@ class User(SQLModel, table=True):
     is_active: bool = Field(default=True)
     last_login: Optional[datetime] = None
 
+class ActivityLog(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str
+    action: str
+    details: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
 
