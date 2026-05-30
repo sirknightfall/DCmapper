@@ -240,9 +240,12 @@ def create_datacenter(dc: DatacenterCreate, session: Session = Depends(get_sessi
     session.refresh(db_dc)
     return db_dc
 
-@app.get("/datacenters/", response_model=List[DatacenterRead])
+@app.get("/datacenters/", response_model=List[DatacenterWithRacksAndDevices])
 def read_datacenters(offset: int = 0, limit: int = Query(default=100, le=100), session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     datacenters = session.exec(select(Datacenter).offset(offset).limit(limit)).all()
+    for dc in datacenters:
+        for rack in dc.racks:
+            rack.devices = [d for d in rack.devices if d.deleted_at is None]
     return datacenters
 
 @app.get("/datacenters/{dc_id}", response_model=DatacenterWithRacksAndDevices)

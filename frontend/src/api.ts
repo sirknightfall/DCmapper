@@ -46,7 +46,7 @@ export const resetPassword = (userId: number, data: any) => api.patch(`/users/${
 export const deleteUser = (userId: number) => api.delete(`/users/${userId}`).then((res: any) => res.data);
 
 // Datacenters
-export const getDatacenters = () => api.get<Datacenter[]>('/datacenters/').then((res: any) => res.data);
+export const getDatacenters = () => api.get<DatacenterWithRacks[]>('/datacenters/').then((res: any) => res.data);
 export const getDatacenter = (id: number) => api.get<DatacenterWithRacks>(`/datacenters/${id}`).then((res: any) => res.data);
 export const createDatacenter = (dc: Omit<Datacenter, 'id'>) => api.post<Datacenter>('/datacenters/', dc).then((res: any) => res.data);
 export const updateDatacenter = (id: number, dc: Partial<Datacenter>) => api.patch<Datacenter>(`/datacenters/${id}`, dc).then((res: any) => res.data);

@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getDatacenters, createDatacenter, deleteDatacenter } from '../api';
-import type { Datacenter } from '../types';
+import type { Datacenter, DatacenterWithRacks } from '../types';
 import { MapPin, Info, Plus, Trash2 } from 'lucide-react';
 import Modal from './Modal';
 import { useAuth } from '../context/AuthContext';
 
 const Dashboard: React.FC = () => {
   const { isAdmin } = useAuth();
-  const [datacenters, setDatacenters] = useState<Datacenter[]>([]);
+  const [datacenters, setDatacenters] = useState<DatacenterWithRacks[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -74,11 +74,59 @@ const Dashboard: React.FC = () => {
 
   if (loading && datacenters.length === 0) return <div className="text-center py-10">Loading locations...</div>;
 
+  const matchesDevice = (device: any, term: string) => {
+    if (device.name && device.name.toLowerCase().includes(term)) return true;
+    if (device.device_type && device.device_type.toLowerCase().includes(term)) return true;
+    if (device.description && device.description.toLowerCase().includes(term)) return true;
+    if (device.vendor_model && device.vendor_model.toLowerCase().includes(term)) return true;
+    if (device.ip_addresses && device.ip_addresses.toLowerCase().includes(term)) return true;
+    if (device.management_ip && device.management_ip.toLowerCase().includes(term)) return true;
+    if (device.management_link && device.management_link.toLowerCase().includes(term)) return true;
+    if (device.network_ports && device.network_ports.toLowerCase().includes(term)) return true;
+    if (device.owner && device.owner.toLowerCase().includes(term)) return true;
+    if (device.custom_values && typeof device.custom_values === 'object') {
+      return Object.values(device.custom_values).some(val => 
+        String(val).toLowerCase().includes(term)
+      );
+    }
+    return false;
+  };
+
+  const getMatchingDevices = (dc: DatacenterWithRacks) => {
+    if (!searchTerm) return [];
+    const term = searchTerm.toLowerCase();
+    const matches: any[] = [];
+    if (dc.racks) {
+      dc.racks.forEach(rack => {
+        if (rack.devices) {
+          rack.devices.forEach(device => {
+            if (matchesDevice(device, term)) {
+              matches.push(device);
+            }
+          });
+        }
+      });
+    }
+    return matches;
+  };
+
   const filteredDCs = datacenters.filter(dc => {
     const term = searchTerm.toLowerCase();
-    return dc.name.toLowerCase().includes(term) ||
-           dc.address.toLowerCase().includes(term) ||
-           (dc.description && dc.description.toLowerCase().includes(term));
+    
+    // 1. Match datacenter details
+    const dcMatches = dc.name.toLowerCase().includes(term) ||
+                      dc.address.toLowerCase().includes(term) ||
+                      (dc.description && dc.description.toLowerCase().includes(term));
+    if (dcMatches) return true;
+    
+    // 2. Match any device within this datacenter
+    if (dc.racks) {
+      return dc.racks.some(rack => 
+        rack.devices && rack.devices.some(device => matchesDevice(device, term))
+      );
+    }
+    
+    return false;
   });
 
   return (
@@ -110,7 +158,7 @@ const Dashboard: React.FC = () => {
         <div className="flex items-center gap-2 w-full md:max-w-md relative">
           <input
             type="text"
-            placeholder="🔍 Search locations (Name, Address, Description...)"
+            placeholder="🔍 Search locations or devices (Name, IP, type, custom...)"
             className="w-full pl-4 pr-10 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-inner"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -130,7 +178,7 @@ const Dashboard: React.FC = () => {
               Found {filteredDCs.length} matching locations
             </span>
           ) : (
-            <span>Type above to search through your physical datacenter locations.</span>
+            <span>Type above to search through locations, racks, or device attributes globally.</span>
           )}
         </div>
       </div>
@@ -169,6 +217,39 @@ const Dashboard: React.FC = () => {
                 {dc.width}x{dc.height} Grid
               </span>
             </div>
+
+            {/* Matching Devices Section */}
+            {searchTerm && getMatchingDevices(dc).length > 0 && (
+              <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-blue-600 block">
+                  Matching Devices ({getMatchingDevices(dc).length})
+                </span>
+                <div className="max-h-32 overflow-y-auto space-y-1.5 pr-1">
+                  {getMatchingDevices(dc).map(device => (
+                    <div 
+                      key={device.id}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        window.location.href = `/rack/${device.rack_id}`;
+                      }}
+                      className="flex justify-between items-center bg-slate-50 hover:bg-blue-50 border border-slate-100 rounded px-2 py-1 text-xs transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          device.status === 'Online' ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.5)]' : 
+                          device.status === 'Offline' ? 'bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]' : 'bg-slate-400'
+                        }`} />
+                        <span className="font-semibold text-slate-700 truncate">{device.name}</span>
+                      </div>
+                      <span className="text-[9px] bg-slate-200 text-slate-600 px-1 rounded truncate ml-2">
+                        {device.device_type}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </Link>
         ))}
         {filteredDCs.length === 0 && !loading && (
