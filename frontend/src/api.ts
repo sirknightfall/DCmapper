@@ -3,7 +3,13 @@ import type { Datacenter, DatacenterWithRacks, Rack, RackWithDevices, Device, Sy
 
 const getBaseUrl = () => {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
-  // If no env var, use the current window hostname but port 8000
+  
+  // In production (served via Nginx in Docker), use the relative reverse proxy path /api
+  if (import.meta.env.PROD) {
+    return '/api';
+  }
+  
+  // In local development, fall back to port 8000 on the host
   const { protocol, hostname } = window.location;
   return `${protocol}//${hostname}:8000`;
 };

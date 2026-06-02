@@ -213,7 +213,6 @@ const GridView: React.FC = () => {
     if (rack.devices && Array.isArray(rack.devices)) {
       return rack.devices.some((device: any) => {
         if (device.name && device.name.toLowerCase().includes(term)) return true;
-        if (device.device_type && device.device_type.toLowerCase().includes(term)) return true;
         if (device.description && device.description.toLowerCase().includes(term)) return true;
         if (device.vendor_model && device.vendor_model.toLowerCase().includes(term)) return true;
         if (device.ip_addresses && device.ip_addresses.toLowerCase().includes(term)) return true;

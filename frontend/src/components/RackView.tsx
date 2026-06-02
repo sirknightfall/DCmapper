@@ -19,7 +19,6 @@ const RackView: React.FC = () => {
     const term = searchTerm.toLowerCase();
     
     if (device.name && device.name.toLowerCase().includes(term)) return true;
-    if (device.device_type && device.device_type.toLowerCase().includes(term)) return true;
     if (device.description && device.description.toLowerCase().includes(term)) return true;
     if (device.vendor_model && device.vendor_model.toLowerCase().includes(term)) return true;
     if (device.ip_addresses && device.ip_addresses.toLowerCase().includes(term)) return true;
@@ -65,7 +64,6 @@ const RackView: React.FC = () => {
   const [newDevice, setNewDevice] = useState<any>({
     name: '',
     description: '',
-    device_type: 'Server',
     vendor_model: '',
     start_u: 1,
     u_height: 1,
@@ -80,7 +78,6 @@ const RackView: React.FC = () => {
   const [editDeviceData, setEditDeviceData] = useState<any>({
     name: '',
     description: '',
-    device_type: 'Server',
     vendor_model: '',
     start_u: 1,
     u_height: 1,
@@ -200,7 +197,6 @@ const RackView: React.FC = () => {
     setEditDeviceData({
       name: device.name,
       description: device.description || '',
-      device_type: device.device_type,
       vendor_model: device.vendor_model || '',
       start_u: device.start_u,
       u_height: device.u_height,
@@ -263,7 +259,6 @@ const RackView: React.FC = () => {
         setNewDevice({
           name: '',
           description: '',
-          device_type: 'Server',
           vendor_model: '',
           start_u: 1,
           u_height: 1,
@@ -517,7 +512,6 @@ const RackView: React.FC = () => {
                         />
                         <span>{device.name}</span>
                       </div>
-                      <span className="text-[10px] opacity-60">{device.device_type}</span>
                     </div>
                   ) : (
                     <span>---</span>
@@ -538,7 +532,7 @@ const RackView: React.FC = () => {
           <div className="mb-4 relative">
             <input
               type="text"
-              placeholder="Search devices by name, type, IP, or custom attributes..."
+              placeholder="Search devices by name, IP, or custom attributes..."
               className="w-full bg-white border border-slate-200 rounded-lg px-4 py-2 pl-10 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-shadow duration-200"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -568,7 +562,7 @@ const RackView: React.FC = () => {
                   <div className="flex justify-between items-start mb-2">
                     <div>
                       <h3 className="font-bold text-lg">{device.name}</h3>
-                      <p className="text-sm text-slate-500">{device.vendor_model} ({device.device_type})</p>
+                      {device.vendor_model && <p className="text-sm text-slate-500">{device.vendor_model}</p>}
                     </div>
                     <div className="flex flex-col items-end gap-2">
                       <button 
@@ -653,20 +647,9 @@ const RackView: React.FC = () => {
       <Modal isOpen={isModalOpen} onClose={clearModals} title="Add New Device">
         <form onSubmit={handleCreate} className="space-y-4 max-h-[80vh] overflow-y-auto px-1">
           {error && <div className="bg-red-50 text-red-600 p-2 rounded text-xs border border-red-200 mb-2">{error}</div>}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Device Name</label>
-              <input required className="w-full border rounded px-3 py-2" value={newDevice.name} onChange={e => setNewDevice({...newDevice, name: e.target.value})} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Type</label>
-              <select className="w-full border rounded px-3 py-2" value={newDevice.device_type} onChange={e => setNewDevice({...newDevice, device_type: e.target.value})}>
-                <option>Server</option>
-                <option>TOR Switch</option>
-                <option>Load Balancer</option>
-                <option>Patch Panel</option>
-              </select>
-            </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Device Name</label>
+            <input required className="w-full border rounded px-3 py-2" value={newDevice.name} onChange={e => setNewDevice({...newDevice, name: e.target.value})} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -691,20 +674,9 @@ const RackView: React.FC = () => {
       <Modal isOpen={isEditModalOpen} onClose={clearModals} title="Edit Device Details">
         <form onSubmit={handleUpdate} className="space-y-4 max-h-[80vh] overflow-y-auto px-1">
           {error && <div className="bg-red-50 text-red-600 p-2 rounded text-xs border border-red-200 mb-2">{error}</div>}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Device Name</label>
-              <input required className="w-full border rounded px-3 py-2" value={editDeviceData.name} onChange={e => setEditDeviceData({...editDeviceData, name: e.target.value})} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Type</label>
-              <select className="w-full border rounded px-3 py-2" value={editDeviceData.device_type} onChange={e => setEditDeviceData({...editDeviceData, device_type: e.target.value})}>
-                <option>Server</option>
-                <option>TOR Switch</option>
-                <option>Load Balancer</option>
-                <option>Patch Panel</option>
-              </select>
-            </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Device Name</label>
+            <input required className="w-full border rounded px-3 py-2" value={editDeviceData.name} onChange={e => setEditDeviceData({...editDeviceData, name: e.target.value})} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>

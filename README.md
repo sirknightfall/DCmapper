@@ -63,7 +63,7 @@ docker compose up -d --build
 ```
 
 The stack starts the following services:
-*   **React Frontend:** [http://localhost:3000](http://localhost:3000)
+*   **React Frontend:** [https://localhost:3000](https://localhost:3000) (Self-signed certificate, accept certificate warning to proceed)
 *   **FastAPI backend:** [http://localhost:8000](http://localhost:8000)
 *   **API Interactive Documentation (Swagger):** [http://localhost:8000/docs](http://localhost:8000/docs)
 

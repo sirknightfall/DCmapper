@@ -20,7 +20,6 @@ export interface Device {
   id: number;
   name: string;
   description?: string;
-  device_type: string;
   vendor_model?: string;
   rack_id: number;
   start_u: number;

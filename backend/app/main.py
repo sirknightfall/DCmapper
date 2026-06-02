@@ -72,6 +72,14 @@ async def on_startup():
         except Exception:
             session.rollback()
 
+    # Simple migration: drop device_type column if it exists in SQLite
+    with Session(engine) as session:
+        try:
+            session.execute(text("ALTER TABLE device DROP COLUMN device_type"))
+            session.commit()
+        except Exception:
+            session.rollback()
+
     # Ensure default fields exist
     try:
         with Session(engine) as session:
@@ -455,7 +463,6 @@ async def analyze_import(dc_id: int, file: UploadFile = File(...), session: Sess
                 errors.append(f"Row {idx} (Device {name}): U slots ({start_u} to {start_u + u_height - 1}) are out of bounds for rack '{rack_name}' (capacity: {max_height_u}U).")
                 continue
                 
-            device_type = get_val(row, ["device type", "device_type", "type of device"], "Server")
             ip_addresses = get_val(row, ["ip addresses", "ip_addresses", "ip", "ips", "ip address"], "")
             management_ip = get_val(row, ["management ip", "management_ip", "mgt ip", "oob ip"], "")
             management_link = get_val(row, ["management link", "management_link", "mgt link", "oob link"], "")
@@ -474,7 +481,6 @@ async def analyze_import(dc_id: int, file: UploadFile = File(...), session: Sess
             parsed_devices.append({
                 "row": idx,
                 "name": name,
-                "device_type": device_type,
                 "rack_name": rack_name,
                 "start_u": start_u,
                 "u_height": u_height,
@@ -565,7 +571,6 @@ def commit_import(dc_id: int, payload: dict, session: Session = Depends(get_sess
             
         new_device = Device(
             name=d_data["name"],
-            device_type=d_data["device_type"],
             rack_id=rack.id,
             start_u=d_data["start_u"],
             u_height=d_data["u_height"],
@@ -594,7 +599,7 @@ def export_datacenter_csv(dc_id: int, session: Session = Depends(get_session), _
     active_fields = session.exec(select(DeviceField).where(DeviceField.is_active == True)).all()
     
     # Base headers that always exist
-    headers = ["Name", "Type", "Rack", "Start U", "Height", "Status", "Last Checked", "Deleted At"]
+    headers = ["Name", "Rack", "Start U", "Height", "Status", "Last Checked", "Deleted At"]
     # Dynamic active headers
     for f in active_fields:
         headers.append(f.label)
@@ -623,7 +628,7 @@ def export_datacenter_csv(dc_id: int, session: Session = Depends(get_session), _
     
     for d in devices:
         row = [
-            d.name, d.device_type, rack_map.get(d.rack_id, "Unknown"), 
+            d.name, rack_map.get(d.rack_id, "Unknown"), 
             d.start_u, d.u_height, d.status,
             d.last_checked.isoformat() if d.last_checked else "Never",
             d.deleted_at.isoformat() if d.deleted_at else "Active"

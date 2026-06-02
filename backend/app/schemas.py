@@ -47,7 +47,6 @@ class RackUpdate(BaseModel):
 class DeviceBase(BaseModel):
     name: str
     description: Optional[str] = None
-    device_type: str
     vendor_model: Optional[str] = None
     rack_id: int
     start_u: int
@@ -72,7 +71,6 @@ class DeviceRead(DeviceBase):
 class DeviceUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    device_type: Optional[str] = None
     vendor_model: Optional[str] = None
     rack_id: Optional[int] = None
     start_u: Optional[int] = None

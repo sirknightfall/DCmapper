@@ -28,7 +28,6 @@ class Device(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     description: Optional[str] = None
-    device_type: str # e.g., Server, TOR Switch
     vendor_model: Optional[str] = None
     
     # Rack location

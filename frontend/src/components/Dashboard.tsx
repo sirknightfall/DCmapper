@@ -76,7 +76,6 @@ const Dashboard: React.FC = () => {
 
   const matchesDevice = (device: any, term: string) => {
     if (device.name && device.name.toLowerCase().includes(term)) return true;
-    if (device.device_type && device.device_type.toLowerCase().includes(term)) return true;
     if (device.description && device.description.toLowerCase().includes(term)) return true;
     if (device.vendor_model && device.vendor_model.toLowerCase().includes(term)) return true;
     if (device.ip_addresses && device.ip_addresses.toLowerCase().includes(term)) return true;
@@ -242,9 +241,6 @@ const Dashboard: React.FC = () => {
                         }`} />
                         <span className="font-semibold text-slate-700 truncate">{device.name}</span>
                       </div>
-                      <span className="text-[9px] bg-slate-200 text-slate-600 px-1 rounded truncate ml-2">
-                        {device.device_type}
-                      </span>
                     </div>
                   ))}
                 </div>
