@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   backend:
@@ -13,15 +13,17 @@ services:
       - NET_RAW
     ports:
       - "8000:8000"
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
     container_name: dcmapper-frontend
     ports:
       - "3000:443"
-      - "80:80"
+      # - "8008:8008"
     depends_on:
       - backend
+    restart: unless-stopped
 
 volumes:
   db_data:
