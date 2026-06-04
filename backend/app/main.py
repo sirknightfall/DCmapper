@@ -256,20 +256,23 @@ def create_datacenter(dc: DatacenterCreate, session: Session = Depends(get_sessi
 @app.get("/datacenters/", response_model=List[DatacenterWithRacksAndDevices])
 def read_datacenters(offset: int = 0, limit: int = Query(default=100, le=100), session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     datacenters = session.exec(select(Datacenter).offset(offset).limit(limit)).all()
+    result = []
     for dc in datacenters:
-        for rack in dc.racks:
+        dc_dto = DatacenterWithRacksAndDevices.model_validate(dc)
+        for rack in dc_dto.racks:
             rack.devices = [d for d in rack.devices if d.deleted_at is None]
-    return datacenters
+        result.append(dc_dto)
+    return result
 
 @app.get("/datacenters/{dc_id}", response_model=DatacenterWithRacksAndDevices)
 def read_datacenter(dc_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     dc = session.get(Datacenter, dc_id)
     if not dc:
         raise HTTPException(status_code=404, detail="Datacenter not found")
-    # Filter out soft-deleted devices for all nested racks
-    for rack in dc.racks:
+    dc_dto = DatacenterWithRacksAndDevices.model_validate(dc)
+    for rack in dc_dto.racks:
         rack.devices = [d for d in rack.devices if d.deleted_at is None]
-    return dc
+    return dc_dto
 
 @app.patch("/datacenters/{dc_id}", response_model=DatacenterRead)
 def update_datacenter(dc_id: int, dc_update: DatacenterUpdate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
@@ -680,9 +683,9 @@ def read_rack(rack_id: int, session: Session = Depends(get_session), _: User = D
     rack = session.get(Rack, rack_id)
     if not rack:
         raise HTTPException(status_code=404, detail="Rack not found")
-    # Filter out soft-deleted devices for the UI
-    rack.devices = [d for d in rack.devices if d.deleted_at is None]
-    return rack
+    rack_dto = RackWithDevices.model_validate(rack)
+    rack_dto.devices = [d for d in rack_dto.devices if d.deleted_at is None]
+    return rack_dto
 
 @app.patch("/racks/{rack_id}", response_model=RackRead)
 def update_rack(rack_id: int, rack_update: RackUpdate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
@@ -838,14 +841,14 @@ def create_device(device: DeviceCreate, session: Session = Depends(get_session),
 @app.get("/devices/{device_id}", response_model=DeviceRead)
 def read_device(device_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     device = session.get(Device, device_id)
-    if not device:
+    if not device or device.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Device not found")
     return device
 
 @app.patch("/devices/{device_id}", response_model=DeviceRead)
 def update_device(device_id: int, device_update: DeviceUpdate, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     db_device = session.get(Device, device_id)
-    if not db_device:
+    if not db_device or db_device.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Device not found")
     
     # Determine new values for validation
@@ -882,7 +885,7 @@ def update_device(device_id: int, device_update: DeviceUpdate, session: Session 
 @app.get("/devices/{device_id}/history", response_model=List[StatusHistoryRead])
 def read_device_history(device_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     device = session.get(Device, device_id)
-    if not device:
+    if not device or device.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Device not found")
     
     # Return history ordered by timestamp
@@ -893,7 +896,7 @@ def read_device_history(device_id: int, session: Session = Depends(get_session),
 @app.get("/devices/{device_id}/ping")
 async def ping_device_endpoint(device_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_active_user)):
     device = session.get(Device, device_id)
-    if not device:
+    if not device or device.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Device not found")
     
     if not device.ip_addresses:
@@ -942,7 +945,7 @@ async def ping_device_endpoint(device_id: int, session: Session = Depends(get_se
 @app.delete("/devices/{device_id}")
 def delete_device(device_id: int, session: Session = Depends(get_session), current_user: User = Depends(require_admin)):
     device = session.get(Device, device_id)
-    if not device:
+    if not device or device.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Device not found")
     # Soft delete
     device.deleted_at = datetime.utcnow()

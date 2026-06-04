@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 # Datacenter Schemas
 class DatacenterBase(BaseModel):
+    model_config = {"from_attributes": True}
     name: str
     address: str
     description: Optional[str] = None
@@ -25,6 +26,7 @@ class DatacenterUpdate(BaseModel):
 
 # Rack Schemas
 class RackBase(BaseModel):
+    model_config = {"from_attributes": True}
     name: str
     datacenter_id: int
     x_coord: int
@@ -45,6 +47,7 @@ class RackUpdate(BaseModel):
 
 # Device Schemas
 class DeviceBase(BaseModel):
+    model_config = {"from_attributes": True}
     name: str
     description: Optional[str] = None
     vendor_model: Optional[str] = None
