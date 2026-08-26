@@ -870,7 +870,7 @@ def update_device(device_id: int, device_update: DeviceUpdate, session: Session 
     for key, value in device_update_dict.items():
         if key == "custom_values":
             # Merge with existing custom values
-            existing = db_device.custom_values or {}
+            existing = dict(db_device.custom_values or {})
             existing.update(value)
             db_device.custom_values = existing
         else:
