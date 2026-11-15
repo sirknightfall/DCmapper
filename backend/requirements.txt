@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 sqlalchemy
-sqlmodel
+sqlmodel==0.0.38
 pydantic
 aiosqlite
 python-multipart
