@@ -1,8 +1,35 @@
-# DCmapper 🖥️📍
+# DCmapper Blueprint 🖥️📍
 
-DCmapper is a lightweight, responsive, full-stack web application designed for mapping physical datacenter locations, managing rack coordinates, inventorying hardware down to individual U-slots, and tracking live device statuses with an asynchronous background ping engine.
+## System Overview
+DCmapper is a containerized full-stack web application for mapping physical datacenter locations, managing 2D rack floor coordinates, inventorying rack-mounted hardware down to individual U-slots, and monitoring live device statuses with an asynchronous background ICMP ping engine.
 
-The system is fully containerized using **Docker** and **Docker Compose**, featuring a fast **FastAPI** backend with SQLite persistence and a modern **React SPA** frontend.
+The system is orchestrated with **Docker Compose** (`[docker-compose.yml:services]`), pairing a **FastAPI + SQLModel + SQLite** backend (`dcmapper-backend` isolated on internal port `8000`) with a **React + TypeScript + Vite + Nginx** frontend (`dcmapper-frontend` on HTTP port `3000 -> 80`).
+
+## Subdirectories & System Boundaries
+- `backend`: [`./backend/README.md`](./backend/README.md) - Containerized Python backend subsystem and build configuration.
+  - `backend/app`: [`./backend/app/README.md`](./backend/app/README.md) - FastAPI application (`[main.py:app]`), SQLModel database schema (`[models.py:*]`), Pydantic DTOs (`[schemas.py:*]`), OAuth2/JWT authentication (`[auth.py:*]`), SQLite engine (`[database.py:*]`), and background ICMP monitor & soft-delete cleanup tasks (`[tasks.py:*]`).
+- `frontend`: [`./frontend/README.md`](./frontend/README.md) - Vite/React/TypeScript build configuration and Nginx HTTP reverse-proxy container (`[nginx.conf:*]`).
+  - `frontend/src`: [`./frontend/src/README.md`](./frontend/src/README.md) - Frontend SPA entry point (`[main.tsx:createRoot]`), router shell (`[App.tsx:App]`), Axios API client (`[api.ts:*]`), and shared TypeScript interfaces (`[types.ts:*]`).
+  - `frontend/src/components`: [`./frontend/src/components/README.md`](./frontend/src/components/README.md) - Feature views and modals (`Config`, `Dashboard`, `GridView`, `Login`, `Modal`, `RackView`, `UserManagement`).
+  - `frontend/src/context`: [`./frontend/src/context/README.md`](./frontend/src/context/README.md) - React authentication context (`AuthProvider`, `useAuth`).
+
+## Global Invariants
+- **Authentication & Role Enforcement:** All backend endpoints except `POST /token` (`[backend/app/main.py:login_for_access_token]`) require an active authenticated user via `[backend/app/auth.py:get_current_active_user]`; mutating endpoints require `current_user.role == "admin"` via `[backend/app/auth.py:require_admin]`. On the frontend, `[frontend/src/App.tsx:MainContent]` gates all routes behind `<Login />` when unauthenticated, and `[frontend/src/api.ts:api]` clears `localStorage` and redirects to `'/'` on HTTP 401.
+- **User Account Integrity:** `[backend/app/main.py:create_user]` enforces unique `User.username`, and both `[backend/app/main.py:delete_user]` and `[frontend/src/components/UserManagement.tsx:handleDeleteUser]` prevent a user from deleting their own account.
+- **Datacenter Floor Grid & Rack Coordinate Integrity:** `[backend/app/main.py:update_datacenter]` blocks shrinking `width` or `height` if any rack has `x_coord >= new_width` or `y_coord >= new_height`. `[backend/app/main.py:update_rack]` and `[backend/app/main.py:analyze_import]` enforce `0 <= x_coord < dc.width`, `0 <= y_coord < dc.height`, and no coordinate overlap between racks in the same datacenter.
+- **Rack Elevation & U-Slot Non-Overlap:** `[backend/app/main.py:update_rack]` prevents lowering `height_u` below the top slot (`start_u + u_height - 1`) of any active mounted device. `[backend/app/main.py:validate_device_placement]` and `[backend/app/main.py:analyze_import]` enforce `1 <= start_u`, `start_u + u_height - 1 <= rack.height_u`, and zero U-slot overlap across active (`deleted_at is None`) devices in the target rack.
+- **Dynamic Custom Fields & Built-in Field Protection:** `[backend/app/main.py:validate_device_fields]` strips inactive/unregistered keys from `Device.custom_values` and enforces non-empty values for active required fields (`DeviceField.required == True`). `[backend/app/main.py:delete_device_field]` prevents hard-deleting built-in fields (`is_custom == False`), deactivating them (`is_active = False`) instead.
+- **Soft-Delete Visibility & History Retention:** `[backend/app/main.py:delete_device]` soft-deletes devices by setting `Device.deleted_at`. Read endpoints exclude soft-deleted devices (`deleted_at is not None`), `[backend/app/tasks.py:status_monitor_task]` purges `StatusHistory` records older than 24 hours on every monitor cycle, and `[backend/app/tasks.py:cleanup_deleted_devices_task]` permanently purges soft-deleted devices older than `SystemConfig.retention_days` every 24 hours.
+- **Bulk CSV Import Size Limit (< 1 MB):** `[frontend/src/components/GridView.tsx:handleImportFileChange]`, `[frontend/nginx.conf:client_max_body_size]` (`1m`), and `[backend/app/main.py:analyze_import]` (`MAX_IMPORT_FILE_BYTES = 1048576`) reject bulk CSV import payloads of `1,048,576` bytes (`1 MB`) or larger.
+
+## Global Side Effects
+- **SQLite Persistence & Schema Bootstrap:** `[docker-compose.yml:services.backend]` mounts Docker volume `db_data` at `/app/data` with `DATABASE_URL=sqlite:///./data/dcmapper.db`. On startup, `[backend/app/main.py:on_startup]` creates SQLModel tables, executes `ALTER TABLE` schema migrations, seeds default `DeviceField`, `SystemConfig`, and `admin`/`viewer` `User` records, and starts background tasks.
+- **ICMP Network Probing:** `[docker-compose.yml:services.backend]` grants `NET_RAW` capability. `[backend/app/tasks.py:status_monitor_task]` periodically spawns `ping -c 1 -W 1 <ip>` for active devices, and `[backend/app/main.py:ping_device_endpoint]` spawns `ping -c 4 -W 2 <ip>` for interactive diagnostics, both updating `Device.status`, `Device.last_checked`, and `StatusHistory`.
+- **Audit Logging:** Mutating API operations record entries in the `ActivityLog` table via `[backend/app/main.py:log_activity]`.
+- **Browser Storage & Reverse Proxy:** Frontend authentication persists `'token'` and `'user'` in `window.localStorage` (`[frontend/src/context/AuthContext.tsx:AuthProvider]`), and `[frontend/nginx.conf:proxy_pass]` listens on HTTP port 80 (mapped to host port `3000`), preserves `X-Forwarded-Proto`, enforces `client_max_body_size 1m;`, and proxies `/api/` traffic to internal `http://backend:8000/`.
+
+## System Verification
+- Run: `cd frontend && npm run build && npm run lint`
 
 ---
 
@@ -10,7 +37,7 @@ The system is fully containerized using **Docker** and **Docker Compose**, featu
 
 ```mermaid
 graph TD
-    User([User Web Browser]) -->|HTTPS / REST & JWT| Frontend[React SPA / Nginx Container]
+    User([User Web Browser]) -->|HTTP (or Upstream TLS Proxy) / REST & JWT| Frontend[React SPA / Nginx Container]
     Frontend -->|API Requests| Backend[FastAPI Backend Container]
     Backend -->|SQLModel ORM| DB[(SQLite Database File)]
     Backend -->|Async Ping Engine| Net[Network Devices]
@@ -63,9 +90,8 @@ docker compose up -d --build
 ```
 
 The stack starts the following services:
-*   **React Frontend:** [https://localhost:3000](https://localhost:3000) (Self-signed certificate, accept certificate warning to proceed)
-*   **FastAPI backend:** [http://localhost:8000](http://localhost:8000)
-*   **API Interactive Documentation (Swagger):** [http://localhost:8000/docs](http://localhost:8000/docs)
+*   **React Frontend:** [http://localhost:3000](http://localhost:3000) (plain HTTP; can be placed behind an F5 load balancer or Nginx TLS reverse proxy)
+*   **API Interactive Documentation (Swagger):** [http://localhost:3000/api/docs](http://localhost:3000/api/docs) (proxied through the frontend container; backend port `8000` is internal to the Docker network)
 
 > [!IMPORTANT]
 > The backend container requires ICMP raw socket permissions to execute ping requests. This is handled automatically by adding the `NET_RAW` capability in `docker-compose.yml`.
@@ -89,6 +115,7 @@ All requests to the backend APIs require token-based authentication using an **O
 | | `PATCH` | `/users/me/password` | Viewer / Admin | Update own user password |
 | | `GET` | `/users/` | Admin | List all registered users |
 | | `POST` | `/users/` | Admin | Register a new user |
+| | `PATCH` | `/users/{user_id}/password` | Admin | Reset a user's password |
 | | `DELETE` | `/users/{user_id}` | Admin | Delete a user (cannot delete self) |
 | **Datacenters** | `GET` | `/datacenters/` | Viewer / Admin | List all datacenter sites |
 | | `POST` | `/datacenters/` | Admin | Create a new datacenter site |
@@ -121,10 +148,10 @@ All requests to the backend APIs require token-based authentication using an **O
 
 ## 🔒 Relational Logic & Constraints
 
-The API protects infrastructure mapping integrity using strict transactional and layout check assertions before executing databases writes:
+The API protects infrastructure mapping integrity using strict transactional and layout check assertions before executing database writes:
 
 *   **Floor Grid Resizing Check:** You cannot shrink the dimensions (`width` or `height`) of a datacenter if there are any configured racks located on coordinates outside the new boundaries.
-*   **Rack Overlap Check:** Relocating or creating a rack on grid coords already occupied by another cabinet is rejected.
-*   **Rack Boundary Check:** Cabinets cannot be placed outside the dimensions of the parent datacenter.
+*   **Rack Overlap Check:** Relocating a rack (`PATCH /racks/{rack_id}`) or importing racks (`POST /datacenters/{dc_id}/import/analyze`) onto grid coordinates already occupied by another cabinet is rejected.
+*   **Rack Boundary Check:** Relocated or imported cabinets cannot be placed outside the dimensions of the parent datacenter.
 *   **Cabinet Shrinkage Check:** Lowering the total U-slots of a rack is blocked if there are active equipment mounted in the slots being trimmed.
 *   **U-Slot Collisions:** Registering or moving devices to slots already occupied by active equipment inside the target rack will return a conflict error.

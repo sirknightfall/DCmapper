@@ -9,18 +9,16 @@ services:
       - db_data:/app/data
     environment:
       - DATABASE_URL=sqlite:///./data/dcmapper.db
+      - ROOT_PATH=/api
     cap_add:
       - NET_RAW
-    ports:
-      - "8000:8000"
     restart: unless-stopped
 
   frontend:
     build: ./frontend
     container_name: dcmapper-frontend
     ports:
-      - "3000:443"
-      # - "8008:8008"
+      - "3000:80"
     depends_on:
       - backend
     restart: unless-stopped

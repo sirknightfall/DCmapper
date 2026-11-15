@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import asyncio
 import csv
 import io
+import os
 from sqlmodel import Session, select, text
 from app.database import create_db_and_tables, get_session, engine
 from app.models import Datacenter, Rack, Device, SystemConfig, StatusHistory, User, DeviceField, ActivityLog
@@ -25,7 +26,9 @@ from app.auth import (
     get_current_active_user, require_admin, ACCESS_TOKEN_EXPIRE_MINUTES
 )
 
-app = FastAPI(title="DCmapper API")
+MAX_IMPORT_FILE_BYTES = 1048576
+
+app = FastAPI(title="DCmapper API", root_path=os.getenv("ROOT_PATH", ""))
 
 app.add_middleware(
     CORSMiddleware,
@@ -330,7 +333,9 @@ async def analyze_import(dc_id: int, file: UploadFile = File(...), session: Sess
     if not dc:
         raise HTTPException(status_code=404, detail="Datacenter not found")
         
-    content = await file.read()
+    content = await file.read(MAX_IMPORT_FILE_BYTES)
+    if len(content) >= MAX_IMPORT_FILE_BYTES:
+        raise HTTPException(status_code=400, detail="Import file exceeds the 1 MB size limit.")
     decoded = content.decode('utf-8', errors='ignore')
     
     reader = csv.reader(io.StringIO(decoded))

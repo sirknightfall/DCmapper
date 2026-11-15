@@ -6,6 +6,8 @@ import { ChevronLeft, Plus, Download, Settings, Trash2, Upload } from 'lucide-re
 import Modal from './Modal';
 import { useAuth } from '../context/AuthContext';
 
+const MAX_IMPORT_FILE_BYTES = 1048576;
+
 const GridView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -39,6 +41,11 @@ const GridView: React.FC = () => {
       setImportAnalysis(null);
       setImportError(null);
       setImportSuccess(false);
+
+      if (file.size >= MAX_IMPORT_FILE_BYTES) {
+        setImportError("Import file exceeds the 1 MB size limit. Please select a file smaller than 1 MB.");
+        return;
+      }
       
       if (id) {
         setIsSubmitting(true);
