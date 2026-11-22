@@ -13,7 +13,7 @@ async def ping_device(ip: str) -> bool:
     """
     # -c 1: send 1 packet
     # -W 1: wait 1 second for response
-    command = ["ping", "-c", "1", "-W", "1", ip]
+    command = ["ping", "-c", "1", "-W", "1", "--", ip]
     
     try:
         process = await asyncio.create_subprocess_exec(

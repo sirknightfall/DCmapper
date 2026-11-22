@@ -1,15 +1,13 @@
-version: "3.8"
-
 services:
   backend:
     build: ./backend
     container_name: dcmapper-backend
     volumes:
-      - ./backend:/app
       - db_data:/app/data
     environment:
       - DATABASE_URL=sqlite:///./data/dcmapper.db
       - ROOT_PATH=/api
+      - SECRET_KEY=${SECRET_KEY:-}
     cap_add:
       - NET_RAW
     restart: unless-stopped
